@@ -82,8 +82,5 @@
 	<true/>
 	<key>GCSupportsControllerUserInteraction</key>
 	<true/>
-	<!-- ProMotion screens: up to 120 frames a second -->
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
 </dict>
 </plist>

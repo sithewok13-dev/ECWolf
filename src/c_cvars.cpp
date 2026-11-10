@@ -43,8 +43,8 @@
 #include "wl_agent.h"
 #include "wl_main.h"
 #include "wl_play.h"
-#ifdef ECWOLF_IOS
-extern "C" void IOS_ScreenPixels(int *w, int *h); // (ios/i_ios.mm)
+#if defined(ECWOLF_IOS) || defined(ECWOLF_IOSRIG)
+bool IOSGame_GameResolution(int *w, int *h); // (ios/IOSGame.cpp)
 #endif
 
 static bool doWriteConfig = false;
@@ -177,7 +177,7 @@ void ReadConfig(void)
 	config.CreateSetting("ForceGrabMouse", false);
 	config.CreateSetting("MouseEnabled", 1);
 	config.CreateSetting("JoystickEnabled", true);
-#ifdef ECWOLF_IOS
+#if defined(ECWOLF_IOS) || defined(ECWOLF_IOSRIG)
 	config.CreateSetting("ViewSize", 20); // (iOS: the view as wide as the status bar)
 #else
 	config.CreateSetting("ViewSize", 19);
@@ -196,16 +196,8 @@ void ReadConfig(void)
 	config.CreateSetting("MusicVolume", MAX_VOLUME);
 	config.CreateSetting("DigitizedVolume", MAX_VOLUME);
 #ifdef ECWOLF_IOS
-	// iOS: the whole screen, at its own resolution, in step with it
-	{
-		int w = 0, h = 0;
-		IOS_ScreenPixels(&w, &h);
-		if(w >= 320 && h >= 200)
-		{
-			fullScreenWidth = w;
-			fullScreenHeight = h;
-		}
-	}
+	// iOS: full screen at the resolution IOSGame_GameResolution picks (set
+	// again below over a saved one), in step with the screen
 	config.CreateSetting("Vid_FullScreen", true);
 	config.CreateSetting("Vid_Aspect", ASPECT_NONE);
 	config.CreateSetting("Vid_Vsync", true);
@@ -285,6 +277,25 @@ void ReadConfig(void)
 	vid_vsync = config.GetSetting("Vid_Vsync")->GetInteger() != 0;
 	fullScreenWidth = config.GetSetting("FullScreenWidth")->GetInteger();
 	fullScreenHeight = config.GetSetting("FullScreenHeight")->GetInteger();
+#if defined(ECWOLF_IOS) || defined(ECWOLF_IOSRIG)
+	// A phone: always the resolution that suits its screen (build 2 saved
+	// the screen's own pixels, a shape ECWolf can't lay out), any aspect
+	// setting undone
+	{
+		int w = 0, h = 0;
+		if(IOSGame_GameResolution(&w, &h))
+		{
+			fullScreenWidth = w;
+			fullScreenHeight = h;
+			config.GetSetting("FullScreenWidth")->SetValue(w);
+			config.GetSetting("FullScreenHeight")->SetValue(h);
+			vid_aspect = ASPECT_NONE;
+			vid_fullscreen = true;
+			config.GetSetting("Vid_Aspect")->SetValue(ASPECT_NONE);
+			printf("iOS: the game draws at %dx%d\n", w, h);
+		}
+	}
+#endif
 	windowedScreenWidth = config.GetSetting("WindowedScreenWidth")->GetInteger();
 	windowedScreenHeight = config.GetSetting("WindowedScreenHeight")->GetInteger();
 	if ((sd = config.GetSetting("ScreenWidth")) != NULL)

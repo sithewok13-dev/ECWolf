@@ -25,6 +25,7 @@
 
 #include "SDL.h"
 #include "SDL_main.h"
+#include "SDL_syswm.h"
 
 #include "filesys.h"
 #include "zstring.h"
@@ -354,24 +355,55 @@ static void IOS_AppInit()
 
 // ---------------------------------------------------------------- the screen
 
-// The screen's own pixels, landscape: what the game draws at (ECWolf's full
-// screen resolution, c_cvars.cpp). A big iPad's is brought down to 1440
-// rows (the game draws in software), keeping its shape.
-extern "C" void IOS_ScreenPixels(int* w, int* h)
+// The screen for the game's picture (IOSGame.cpp: IOSGame_GameResolution):
+// its points, landscape; its pixels a point; and the home indicator's
+// inset at the bottom in landscape (UIKit's, from a window already up;
+// else 21 points on a phone without a home button, 20 on an iPad with
+// rounded corners, as UIKit gives them)
+extern "C" void IOS_ScreenGeometry(double* ptW, double* ptH, double* scale, double* bottomPt)
 {
-	const CGRect b = UIScreen.mainScreen.nativeBounds;
-	double pw = fmax(b.size.width, b.size.height), ph = fmin(b.size.width, b.size.height);
-	if (ph > 1440)
+	UIScreen* screen = UIScreen.mainScreen;
+	const CGRect b = screen.bounds;
+	*ptW = fmax(b.size.width, b.size.height);
+	*ptH = fmin(b.size.width, b.size.height);
+	*scale = screen.nativeScale > 0 ? screen.nativeScale : screen.scale;
+	double bottom = -1;
+	for (UIWindow* w in AppScene().windows)
+		if (!w.hidden && w.bounds.size.width > w.bounds.size.height && (w.safeAreaInsets.bottom > 0 || w.safeAreaInsets.left > 0))
+		{
+			bottom = w.safeAreaInsets.bottom; // (a landscape window's)
+			break;
+		}
+	if (bottom < 0)
 	{
-		pw = pw * 1440 / ph;
-		ph = 1440;
+		const BOOL pad = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad;
+		// (a home button's screens: 16:9 phones, 4:3 iPads with square corners)
+		bottom = pad ? 20 : (*ptW / *ptH > 1.9 ? 21 : 0);
 	}
-	*w = (int)pw & ~1;
-	*h = (int)ph & ~1;
+	*bottomPt = bottom;
+	static bool logged = false;
+	if (!logged)
+	{
+		logged = true;
+		printf("iOS: screen %.0fx%.0f points, x%.2f, home indicator %.0f points\n", *ptW, *ptH, *scale, *bottomPt);
+		fflush(stdout);
+	}
 }
 
-// The tray's FPS at 60 on a 120 Hz screen: frames kept at most 1/60 s
-// apart (the waits save battery). (From the UZDoom and Raze ports.)
+// The home indicator's inset of SDL's view now, in SDL's output pixels
+extern "C" double IOS_ViewBottomInset(SDL_Window* window, int outH)
+{
+	SDL_SysWMinfo info;
+	SDL_VERSION(&info.version);
+	if (!window || !SDL_GetWindowWMInfo(window, &info) || info.subsystem != SDL_SYSWM_UIKIT || !info.info.uikit.window) return 0;
+	UIView* view = info.info.uikit.window.rootViewController.view ?: info.info.uikit.window;
+	const CGFloat h = view.bounds.size.height;
+	if (h <= 0) return 0;
+	return view.safeAreaInsets.bottom * outH / h;
+}
+
+// Frames kept at most 1/60 s apart (Wolf3D runs at a fixed 60; the waits
+// save battery on a 120 Hz screen). (From the UZDoom and Raze ports.)
 extern "C" void IOS_FrameCap(void)
 {
 	static uint64_t next = 0;
@@ -427,6 +459,11 @@ int main(int argc, char* argv[])
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 	SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2");
 	SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+	// SDL makes the phone's accelerometer joystick 0 unless told not to;
+	// ECWolf opened it and read gravity as a stick held to one side: the
+	// view turned on its own whenever the phone wasn't flat. (Tilt aiming
+	// is the overlay's GYRO; real game controllers still work.)
+	SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
 	IOS_AppInit();
 	// (ECWolf also looks for game files in the folder it runs in)
 	chdir(IOSGameData_Documents());

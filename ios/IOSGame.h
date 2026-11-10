@@ -31,3 +31,15 @@ void IOSGame_SetWindow(struct SDL_Window *pWindow);
 void IOSGame_WindowGone(struct SDL_Window *pWindow);
 // US_LineInput (a save's name...): the iOS keyboard comes up for it
 void IOSGame_TextInput(bool bOn);
+
+// The picture on a phone's screen (sdlvideo.cpp, c_cvars.cpp): ECWolf only
+// lays itself out right at 4:3, 16:10, 16:9 and 64:27 (any other shape it
+// takes for 4:3 with stretched pixels), so the game draws at whichever of
+// those fills most of the screen above the home indicator (64:27 on an
+// iPhone with a Dynamic Island: the full width), at half the screen's
+// pixels (sharp: shown at exactly 2x, nearest), placed above the home
+// indicator. false: no phone screen (the desktop build, a rig run without
+// IOSRIG_SCREEN)
+bool IOSGame_GameResolution(int *w, int *h);
+// Where the picture (texW x texH) goes in SDL's output (outW x outH pixels)
+bool IOSGame_PictureRect(struct SDL_Window *pWindow, int outW, int outH, int texW, int texH, struct SDL_Rect *dst);

@@ -525,14 +525,27 @@ bool SDLVideo::NextMode (int *width, int *height, bool *letterbox)
 	if (IteratorBits != 8)
 		return false;
 
+#ifdef ECWOLF_TOUCH
+	// (a phone: its own resolution first, else ECWolf took the nearest of
+	// the list below, bigger than the screen and of another shape)
+	if (IteratorMode == 0)
+	{
+		++IteratorMode;
+		if (IOSGame_GameResolution (width, height))
+			return true;
+	}
+	const unsigned modeIndex = IteratorMode - 1;
+#else
+	const unsigned modeIndex = IteratorMode;
+#endif
 #if !SDL_VERSION_ATLEAST(2,0,0)
 	if (!IteratorFS)
 	{
 #endif
-		if ((unsigned)IteratorMode < sizeof(WinModes)/sizeof(WinModes[0]))
+		if (modeIndex < sizeof(WinModes)/sizeof(WinModes[0]))
 		{
-			*width = WinModes[IteratorMode].Width;
-			*height = WinModes[IteratorMode].Height;
+			*width = WinModes[modeIndex].Width;
+			*height = WinModes[modeIndex].Height;
 			++IteratorMode;
 			return true;
 		}
@@ -701,9 +714,21 @@ SDLFB::SDLFB (int width, int height, bool fullscreen)
 	}
 	else
 	{
+		int winW = width, winH = height;
+#ifdef ECWOLF_IOSRIG
+		// (the rig's X screen has no window manager to make a full screen
+		// window the screen's size: asked for at that size)
+		SDL_DisplayMode desktop;
+		int phoneW, phoneH;
+		if (fullscreen && IOSGame_GameResolution (&phoneW, &phoneH) && SDL_GetDesktopDisplayMode (0, &desktop) == 0)
+		{
+			winW = desktop.w;
+			winH = desktop.h;
+		}
+#endif
 		Screen = SDL_CreateWindow (GetGameCaption(),
 			SDL_WINDOWPOS_UNDEFINED_DISPLAY(vid_adapter), SDL_WINDOWPOS_UNDEFINED_DISPLAY(vid_adapter),
-			width, height, (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0)
+			winW, winH, (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0)
 #ifdef ECWOLF_IOS
 			// (iOS: the screen's own pixels, not its points)
 			| SDL_WINDOW_ALLOW_HIGHDPI
@@ -713,6 +738,12 @@ SDLFB::SDLFB (int width, int height, bool fullscreen)
 		if (Screen == NULL)
 			return;
 	}
+#ifdef ECWOLF_IOS
+	// (one turn of the main run loop, so UIKit finishes showing SDL's view
+	// controller before anything else touches it: without it, iOS logged
+	// "Unbalanced calls to begin/end appearance transitions")
+	SDL_PumpEvents ();
+#endif
 #ifdef ECWOLF_TOUCH
 	IOSGame_SetWindow(Screen);
 #endif
@@ -915,6 +946,17 @@ void SDLFB::Update ()
 
 		//SDLFlipCycles.Clock();
 		SDL_RenderClear(Renderer);
+#ifdef ECWOLF_TOUCH
+		// (a phone: the picture where IOSGame_PictureRect puts it, above the
+		// home indicator, at a whole number of pixels to the game's)
+		SDL_Rect dst;
+		int outW = 0, outH = 0;
+		if(!SDL_GetRendererOutputSize(Renderer, &outW, &outH) && IOSGame_PictureRect(Screen, outW, outH, Width, Height, &dst))
+		{
+			SDL_RenderCopy(Renderer, Texture, NULL, &dst);
+		}
+		else
+#endif
 		SDL_RenderCopy(Renderer, Texture, NULL, NULL);
 
 #ifdef __ANDROID__
@@ -1158,6 +1200,13 @@ void SDLFB::ResetSDLRenderer ()
 
 	// In fullscreen, set logical size according to animorphic ratio.
 	// Windowed modes are rendered to fill the window (usually 1:1)
+#ifdef ECWOLF_TOUCH
+	// (a phone: none, the picture is placed in pixels in Update)
+	int phoneW, phoneH;
+	if (UsingRenderer && IOSGame_GameResolution (&phoneW, &phoneH))
+		SDL_RenderSetLogicalSize (Renderer, 0, 0);
+	else
+#endif
 	if (IsFullscreen ())
 	{
 		int w, h;

@@ -36,6 +36,7 @@ iPhone > Wolf3D > ECWolf.
   wheel).
 - QUICK SAVE and QUICK LOAD: hold 0.3 s.
 - MENU: tap for the game's menu; hold for the tray (SENS, GYRO, OPACITY,
-  FPS, the keyboard).
+  FPS, the keyboard). FPS shows or hides the frame counter; the game always
+  runs at 60 frames a second.
 - In the menus and on the title screens: tap to select or go on, slide up
   or down (or the arrows) to move, BACK to go back.

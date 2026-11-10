@@ -637,6 +637,15 @@ IN_Startup(void)
 #endif
 		{
 			Joystick = SDL_JoystickOpen(param_joystickindex);
+#ifdef ECWOLF_IOS
+			// (never the phone's own accelerometer, should SDL offer it: its
+			// gravity reads as a stick held over, and the view turns by itself)
+			if(Joystick && SDL_JoystickName(Joystick) && strstr(SDL_JoystickName(Joystick), "Accelerometer"))
+			{
+				SDL_JoystickClose(Joystick);
+				Joystick = NULL;
+			}
+#endif
 			if(Joystick)
 			{
 				JoyNumButtons = SDL_JoystickNumButtons(Joystick);

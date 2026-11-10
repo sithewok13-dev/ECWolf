@@ -158,7 +158,7 @@ enum {
   KIND_HOLDSAVE, // asks for a quick save once held IOSTOUCH_QUICKSAVE_HOLD seconds without leaving it
   KIND_HOLDLOAD, // asks for a quick load once held IOSTOUCH_QUICKLOAD_HOLD seconds without leaving it
   KIND_KEYBOARD, // (MENU's tray) the iOS keyboard up or down, when the touch lifts on it
-  KIND_FPS,      // (MENU's tray) shows or hides the FPS readout, when the touch lifts on it; held IOSTOUCH_MENU_HOLD, 60 or 120
+  KIND_FPS,      // (MENU's tray) shows or hides the FPS readout, when the touch lifts on it (no hold action)
   KIND_GYRO,     // (MENU's tray) the next tilt aiming mode, when the touch lifts on it
   KIND_GYROSENS, // (MENU's tray) the next tilt aiming sensitivity, when the touch lifts on it
   KIND_WHEEL,    // NEXT WPN: a tap presses its game button once as it lifts; a slide or a hold opens the weapon wheel
@@ -621,8 +621,8 @@ typedef struct {
   double tDown;         // when it began
   int bFired;           // QUICK SAVE, QUICK LOAD: the hold is over (a save or load was asked for, by this finger or
                         // another one on either button, or it slid off). MENU: the hold is over (tray opened, or
-                        // slid off). MAP, RUN: it slid (a look), so its lift does nothing. The tray's FPS, OPACITY:
-                        // held (60/120, back to 100%). The menus: it slid (no tap). BACK, the arrows: when the key
+                        // slid off). MAP, RUN: it slid (a look), so its lift does nothing. The tray's OPACITY:
+                        // held (back to 100%); FPS: slid off. The menus: it slid (no tap). BACK, the arrows: when the key
                         // goes again (tRepeat)
   int trayButton;       // MENU, after its tray opened: the tray button under the finger, or -1
   // Where it went down (NEXT WPN, PREV WPN: a slide's distance and aim are measured from there; MAP's slide too)
@@ -654,12 +654,12 @@ static int _iRequests = 0;                 // IOSTOUCH_REQ_* not handed out yet
 static IOSTouchHud _hud;                   // the latest HUD state
 static int _bTrayOpen = 0;                 // MENU's tray
 static int _bShowFps = 0;                  // the FPS readout (the view keeps it in the app's settings)
-// The frame rate asked of the screen: 60, or 120 on a ProMotion screen
-// (smoother, more battery). The tray's FPS held switches it, with a ring;
-// the view keeps it in the app's settings and asks the screen for it
-static int _iMaxFps = 60;
+// The frame rate asked of the screen: always 60 in Wolf3D (the owner's
+// call: the game draws at most one frame per 70 Hz tic, so 120 gained
+// nothing). The tray's FPS only shows or hides the readout.
+static const int _iMaxFps = 60;
 
-// The frame rate asked for in the tray (FPS held): 60 or 120
+// The frame rate asked of the screen (fixed: 60)
 int IOSTouch_MaxFps(void)
 {
   return _iMaxFps;
@@ -2210,7 +2210,7 @@ static void IOSTouch_TouchEnded(const void *touch, double x, double y, int bCanc
         _iRequests |= b->ulAction; // (MAP, RUN: not once it slid -- a look)
       }
       else if (IOSTouch_IsTrayButton(s->button) && !((s->button == BTN_TRAYFPS || s->button == BTN_TRAYOPACITY) && s->bFired)) {
-        IOSTouch_UseTrayButton(s->button); // (not the tray's FPS or OPACITY once held: that switched 60/120, or set 100%)
+        IOSTouch_UseTrayButton(s->button); // (not the tray's FPS slid off, or OPACITY once held: that set 100%)
       }
       else if (b->kind == KIND_MENU && !s->bFired) {
         _iRequests |= b->ulAction; // a tap: the menu
@@ -2344,23 +2344,12 @@ static void IOSTouch_TickHolds(double now)
       }
     }
     else if (s->button == BTN_TRAYFPS) {
-      // the tray's FPS held: 60 or 120 frames a second (the lift then does
-      // nothing)
+      // the tray's FPS: no hold action (the frame rate is fixed at 60); slid
+      // off, the lift does nothing
       if (!IOSTouch_LiftsOnButton(s->x, s->y, BTN_TRAYFPS)) {
         s->bFired = 1;
         _fFpsRing = 0.0f;
         continue;
-      }
-      const double progress = (now - s->tDown) / IOSTOUCH_MENU_HOLD;
-      if (progress >= 1.0) {
-        s->bFired = 1;
-        _fFpsRing = 0.0f;
-        _iMaxFps = (_iMaxFps == 120) ? 60 : 120;
-        _ctMaxFpsChanges++;
-        IOSTouch_Message(_iMaxFps == 120 ? "120 FPS: smoother, uses more battery" : "60 FPS: cooler, uses less battery");
-      }
-      else {
-        _fFpsRing = (float)progress;
       }
     }
     else if (s->button == BTN_MENU) {
@@ -2727,8 +2716,6 @@ void IOSTouch_TakeGyro(float *pfYaw, float *pfPitch)
 #define IOSTOUCH_FPS_DEFAULTS_KEY @"iosTouchShowFps"
 #define IOSTOUCH_GYRO_DEFAULTS_KEY @"iosTouchGyroMode"
 #define IOSTOUCH_GYRO_SENS_DEFAULTS_KEY @"iosTouchGyroSens"
-// ...and the frame rate asked for (the tray's FPS held: 60 or 120)
-#define IOSTOUCH_MAXFPS_DEFAULTS_KEY @"iosTouchMaxFps"
 // ...and OPACITY's strength (never set: 100%), and its slider's size
 #define IOSTOUCH_OPACITY_DEFAULTS_KEY @"iosTouchOpacity"
 #define IOSTOUCH_OPACITY_W 260.0
@@ -2906,11 +2893,8 @@ typedef struct {
   float fOpacityLabel;
   int ctOpacityResetsFelt;
   int iMaxFpsLabel;
-  int iMaxFpsSaved;
   int ctMaxFpsFelt;
   CADisplayLink *frameRateLink;
-  int ctRefreshTicks;
-  double tRefreshStart;
   UIImpactFeedbackGenerator *fpsThump;
   double tLastTick;
 }
@@ -3039,15 +3023,12 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     iGyroModeSaved = _iGyroMode;
     iGyroSensSaved = _iGyroSens;
     iGyroLabels = -1;
-    for (int i = BTN_TRAYSENS; i <= BTN_TRAYFPS; i++) { // (OPACITY and FPS too: "FPS\n120")
+    for (int i = BTN_TRAYSENS; i <= BTN_TRAYFPS; i++) { // (OPACITY and FPS too)
       aButtonViews[i].font = IOSTouch_TrayFont(IOSTouch_FontSize("GYRO\nALWAYS", _aButtons[i].radius));
     }
-    // The tray's FPS says the frame rate asked for ("FPS\n60"), switched held
-    // (its ring, a thump)
+    // The tray's FPS: just "FPS" (the frame rate is fixed at 60; a 120
+    // saved by build 2 is ignored)
     NSUserDefaults *dFps = [NSUserDefaults standardUserDefaults];
-    const NSInteger iMaxFps = [dFps integerForKey:IOSTOUCH_MAXFPS_DEFAULTS_KEY];
-    _iMaxFps = (iMaxFps == 120) ? 120 : 60;
-    iMaxFpsSaved = _iMaxFps;
     iMaxFpsLabel = -1;
     ctMaxFpsFelt = _ctMaxFpsChanges;
     fpsRing = IOSTouch_MakeHoldRing(_aButtons[BTN_TRAYFPS].radius);
@@ -3217,9 +3198,11 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
 }
 
 // The frame rate asked of the screen: a display link that does nothing but
-// say what rate the app wants (ProMotion screens give an app 60 unless it
-// asks; Info.plist's CADisableMinimumFrameDurationOnPhone lets it ask 120).
-// The game's frames follow the screen (vsync).
+// say what rate the app wants (60, fixed). The game's frames follow the
+// screen (vsync); IOSGame.cpp logs the rate the game really draws at.
+// (The link's own ticks only run when SDL pumps the main run loop, once a
+// game frame, so they can't measure the screen: build 2's "the screen runs
+// at 30 Hz" was that, not the screen.)
 - (void)applyMaxFps
 {
   if (!frameRateLink) {
@@ -3227,26 +3210,16 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     [frameRateLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
   }
   const float f = (float)_iMaxFps;
-  frameRateLink.preferredFrameRateRange = CAFrameRateRangeMake(_iMaxFps == 120 ? 80.0f : 60.0f, f, f);
+  frameRateLink.preferredFrameRateRange = CAFrameRateRangeMake(f, f, f);
   // (for the log: what the screen can do, and whether Low Power Mode caps it)
   printf("iOS: asked the screen for %d Hz (it can do %ld; Low Power Mode %s)\n", _iMaxFps,
          (long)[UIScreen mainScreen].maximumFramesPerSecond, [NSProcessInfo processInfo].lowPowerModeEnabled ? "on: 60 at most" : "off");
   fflush(stdout);
-  ctRefreshTicks = 0;
-  tRefreshStart = 0.0;
 }
 
-// (for the log: the rate the screen really runs at, once after each change)
 - (void)frameRateTick:(CADisplayLink *)link
 {
-  if (tRefreshStart == 0.0) { tRefreshStart = link.timestamp; return; }
-  if (ctRefreshTicks < 0) return;
-  ctRefreshTicks++;
-  if (link.timestamp - tRefreshStart >= 5.0) {
-    printf("iOS: the screen runs at %.0f Hz\n", ctRefreshTicks / (link.timestamp - tRefreshStart));
-    fflush(stdout);
-    ctRefreshTicks = -1;
-  }
+  (void)link;
 }
 
 // OPACITY's slider: the controls follow it as it slides, the strength is
@@ -3269,12 +3242,12 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
   [[NSUserDefaults standardUserDefaults] setFloat:_fOpacity forKey:IOSTOUCH_OPACITY_DEFAULTS_KEY];
 }
 
-// What the tray's FPS says: the frame rate asked for ("FPS\n60")
+// What the tray's FPS says: just "FPS" (it shows or hides the readout)
 - (void)refreshMaxFpsLabel
 {
   if (iMaxFpsLabel == _iMaxFps) return;
   iMaxFpsLabel = _iMaxFps;
-  aButtonViews[BTN_TRAYFPS].text = [NSString stringWithFormat:@"FPS\n%d", _iMaxFps];
+  aButtonViews[BTN_TRAYFPS].text = @"FPS";
 }
 
 // Which buttons show and how; the tray and the FPS readout
@@ -3352,10 +3325,6 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
   if (iGyroModeSaved != _iGyroMode) {
     iGyroModeSaved = _iGyroMode;
     [[NSUserDefaults standardUserDefaults] setInteger:_iGyroMode forKey:IOSTOUCH_GYRO_DEFAULTS_KEY];
-  }
-  if (iMaxFpsSaved != _iMaxFps) {
-    iMaxFpsSaved = _iMaxFps;
-    [[NSUserDefaults standardUserDefaults] setInteger:_iMaxFps forKey:IOSTOUCH_MAXFPS_DEFAULTS_KEY];
   }
   if (iGyroSensSaved != _iGyroSens) {
     iGyroSensSaved = _iGyroSens;
@@ -3867,7 +3836,7 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
     [self refreshButtonLooks];
     [self refreshStick];
   }
-  // FPS held: 60 or 120 (a thump, its label, the screen asked)
+  // (the frame rate asked of the screen: fixed, never changes)
   if (ctMaxFpsFelt != _ctMaxFpsChanges) {
     ctMaxFpsFelt = _ctMaxFpsChanges;
     [fpsThump impactOccurred];

@@ -8,8 +8,13 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
 
 - **Build branch:** `ios`. `master` is left as upstream (ECWolf).
 - **Stage 1 (this):** an IPA that installs and plays: SDL2 renderer, full
-  screen landscape at the screen's own resolution (`IOS_ScreenPixels`, a big
-  iPad brought down to 1440 rows), sound and music, settings, saves and the
+  screen landscape (`IOSGame_GameResolution` in `ios/IOSGame.cpp`: ECWolf
+  only lays out 4:3, 16:10, 16:9 and 64:27, so the game draws at whichever
+  fills most of the screen above the home indicator, 64:27 full width on a
+  Dynamic Island iPhone, at half the screen's pixels; it's the first entry
+  of the mode list and overrides a saved resolution; `IOSGame_PictureRect`
+  places it at exactly 2x, nearest, above the home indicator), sound and
+  music, settings, saves and the
   log (`wolf3d-log.txt`) in Documents/ECWolf (Files shows them). No game
   files: a first screen says where to copy them and starts the game once
   they are found. The game files go anywhere in Files > On My iPhone >
@@ -23,7 +28,8 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
 - **Later stages:** CAMERA, the sithewok cheat, AUTOPLAY (as in the owner's
   other ports); none of it is here yet.
 - **iOS code:** `ios/`: `i_ios.mm` (main, paths, the first screen, the
-  picker's fallback and the error alert, the log, the 60 FPS cap),
+  picker's fallback and the error alert, the log, the 60 FPS cap; SDL's accelerometer joystick is off: ECWolf read
+  it as a stick and the view turned by itself),
   `IOSPicker.mm`, `IOSTouch.m`/`.h` (the overlay, C core + UIKit view, from
   the UZDoom port's), `IOSGame.cpp` (the game side), `IOSGameData.cpp`,
   `Info.plist.in`, `build_deps.sh` (SDL2, SDL2_mixer, SDL2_net). Engine
@@ -41,8 +47,10 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   keys (one per 30 pt), BACK is Escape, ▲ ▼ on the right, MENU too. Keys go
   in as real SDL key events, one at a time (`PumpKeys`).
 - **Frame rate:** ECWolf draws one frame per 70 Hz tic and doesn't
-  interpolate, so FPS 120 shows at most 70; the game's speed never changes
-  (tics are counted from the clock). FPS 60 keeps frames 1/60 s apart.
+  interpolate. Wolf3D always runs at 60 (the owner's call: no 60/120
+  switch): the screen is asked for 60 and frames are kept 1/60 s apart; the
+  game's speed never changes (tics are counted from the clock). The log
+  gives fps and ms per frame every 5 s of play (`LogFrameRate`).
 - **CI:** `.github/workflows/ios.yml` (macos-15, newest Xcode): deps cached,
   host `zipdir` (TOOLS_ONLY) for the pk3, the iOS build, the icon from
   `src/macosx/icon.iconset`, `Wolf3D-ios.ipa`, a check that fails if game
@@ -60,7 +68,9 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   `SDL2{,_mixer,_net}_LIBRARIES` / `_INCLUDE_DIRS` pointing at them.
 - Run with `IOSRIG_DOCUMENTS=<folder standing in for Documents>`,
   `IOSRIG_SCRIPT=<script>` and `HOME=<scratch>` under Xvfb
-  (`--res 1688 780`). With no game files it prints the first screen and
+  (`--res 1688 780`). A phone's screen: `IOSRIG_SCREEN="874 402 3 21"`
+  (points wide, high, scale, home indicator inset) on an X screen of its
+  pixels (`-screen 0 2622x1206x24`), no `--res`. With no game files it prints the first screen and
   exits 3. Script lines: `frame <n>`, `wait <n>`, touches (`down/move/up
   <id> <x y | @BUTTON>`, `tapslice`, `gyro`, `state`), `pos`, `key <SDL
   name>`, `shot <png>` (ImageMagick `import`), `quit`. The picker is the
@@ -95,8 +105,9 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   - OPACITY (tray): tap = a slider under the tray, 20% to 100% in 5% steps,
     live, saved on lift (`iosTouchOpacity`, default 100%); hold = back to
     100%. The controls follow it; the tray and the wheel stay at full.
-  - FPS (tray): tap = show/hide the FPS readout; hold 0.45 s (ring) = 60 <->
-    120 ("FPS 60", default 60) with a toast and a haptic. Remembered.
+  - FPS (tray): tap = show/hide the FPS readout. Wolf3D differs from the
+    other ports here (the owner's call): no 60/120 switch, no hold action,
+    the label just "FPS"; the game runs at a fixed 60.
   - GYRO: OFF (default) / TOUCH (aims while either thumb is down; lifting
     both freezes the view) / ALWAYS. SENS 1.0/1.5/2.0/3.0, default 1.5.
     Remembered.

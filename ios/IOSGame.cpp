@@ -70,9 +70,144 @@ void IOSGame_WindowGone(SDL_Window *pWindow)
 	}
 }
 
+//---------------------------------------------------------------------------
+// The picture's size and place on the screen
+//---------------------------------------------------------------------------
+
+#ifdef ECWOLF_IOS
+// (i_ios.mm) the screen in points, landscape, its pixels a point, and the
+// home indicator's inset at the bottom (points); the inset of SDL's view now
+extern "C" void IOS_ScreenGeometry(double *ptW, double *ptH, double *scale, double *bottomPt);
+extern "C" double IOS_ViewBottomInset(SDL_Window *pWindow, int outH);
+#else
+// The rig: IOSRIG_SCREEN="<points wide> <points high> <scale> <bottom inset>"
+// stands in for a phone (run on an X screen of its pixels, --fullscreen)
+static bool RigGeometry(double *ptW, double *ptH, double *scale, double *bottomPt)
+{
+	const char *env = getenv("IOSRIG_SCREEN");
+	return env && sscanf(env, "%lf %lf %lf %lf", ptW, ptH, scale, bottomPt) == 4 && *ptW > 0 && *ptH > 0 && *scale > 0;
+}
+#endif
+
+bool IOSGame_GameResolution(int *w, int *h)
+{
+	double ptW, ptH, scale, bottomPt;
+#ifdef ECWOLF_IOS
+	IOS_ScreenGeometry(&ptW, &ptH, &scale, &bottomPt);
+#else
+	if(!RigGeometry(&ptW, &ptH, &scale, &bottomPt))
+		return false;
+#endif
+	const double W = ptW * scale, H = (ptH - bottomPt) * scale;
+	// the shapes ECWolf knows (wl_main.cpp: CheckRatio), the one shown biggest
+	static const double shapes[][2] = { { 4, 3 }, { 16, 10 }, { 16, 9 }, { 64, 27 } };
+	double best = 0, bestArea = 0;
+	for(unsigned int i = 0;i < 4;i++)
+	{
+		const double a = shapes[i][0] / shapes[i][1];
+		const double pw = W < H * a ? W : H * a;
+		if(pw * (pw / a) > bestArea * 1.01)
+		{
+			bestArea = pw * (pw / a);
+			best = a;
+		}
+	}
+	double ph = (W < H * best ? W : H * best) / best;
+	// half the screen's pixels once that's still 360 rows or more (the
+	// game draws in software: a quarter of the work)
+	const int div = ph >= 720 ? 2 : 1;
+	int gh = ((int)(ph / div)) & ~1;
+	int gw = ((int)(gh * best + 0.5)) & ~1;
+	while(gw * div > (int)W && gh > 200)
+	{
+		gh -= 2;
+		gw = ((int)(gh * best + 0.5)) & ~1;
+	}
+	if(gw < 320 || gh < 200)
+		return false;
+	*w = gw;
+	*h = gh;
+	return true;
+}
+
+bool IOSGame_PictureRect(SDL_Window *pWindow, int outW, int outH, int texW, int texH, SDL_Rect *dst)
+{
+	if(outW <= 0 || outH <= 0 || texW <= 0 || texH <= 0)
+		return false;
+	double bottom = 0;
+#ifdef ECWOLF_IOS
+	bottom = IOS_ViewBottomInset(pWindow, outH);
+#else
+	(void)pWindow;
+	double ptW, ptH, scale, bottomPt;
+	if(!RigGeometry(&ptW, &ptH, &scale, &bottomPt))
+		return false;
+	bottom = bottomPt * scale;
+#endif
+	if(bottom < 0 || bottom > outH / 4)
+		bottom = 0;
+	const double availH = outH - bottom;
+	double k = (double)outW / texW;
+	if(availH / texH < k)
+		k = availH / texH;
+	// a whole number of the screen's pixels to the game's, when that loses
+	// little (sharp, even pixels)
+	if(k >= 1 && floor(k) / k >= 0.9)
+		k = floor(k);
+	const int w = (int)(texW * k + 0.5), h = (int)(texH * k + 0.5);
+	int y = (outH - h) / 2;
+	if(y + h > (int)availH)
+		y = (int)availH - h;
+	if(y < 0)
+		y = 0;
+	dst->x = (outW - w) / 2;
+	dst->y = y;
+	dst->w = w;
+	dst->h = h;
+	return true;
+}
+
+// For the log: every 5 s of play, the frames a second the game really drew
+// and the time between them (average and longest)
+static void LogFrameRate()
+{
+	static Uint64 start = 0, last = 0, longest = 0;
+	static unsigned int frames = 0;
+	const Uint64 now = SDL_GetPerformanceCounter(), freq = SDL_GetPerformanceFrequency();
+	// (the mode the last events were pumped in: in play, the frame is too)
+	if(lastMode != IOSTOUCH_GAMEPLAY || (last && now - last > freq / 4))
+	{
+		start = last = 0; // (not in play, or a pause or a load: start again)
+		if(lastMode != IOSTOUCH_GAMEPLAY)
+			return;
+	}
+	if(!start)
+	{
+		start = last = now;
+		frames = 0;
+		longest = 0;
+		return;
+	}
+	frames++;
+	if(now - last > longest)
+		longest = now - last;
+	last = now;
+	if(now - start >= freq * 5)
+	{
+		const double secs = (double)(now - start) / freq;
+		printf("iOS: %.1f fps in play, %.1f ms a frame (longest %.1f ms), %dx%d\n", frames / secs, secs * 1000.0 / frames,
+			longest * 1000.0 / freq, screenWidth, screenHeight);
+		fflush(stdout);
+		start = last = now;
+		frames = 0;
+		longest = 0;
+	}
+}
+
 void IOSGame_FrameDrawn()
 {
 	framesDrawn++;
+	LogFrameRate();
 }
 
 void IOSGame_SetInPlay(bool bInPlay)
