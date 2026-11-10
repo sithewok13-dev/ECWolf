@@ -185,6 +185,7 @@ enum {
   KIND_LEVELPICK,// (MENU's tray, the cheat on) opens the list of levels, when the touch lifts on it
   KIND_CAMERA,   // CAMERA: a tap, a hold, a slide (see IOSTOUCH_SELFIE_HOLD)
   KIND_CAMSWITCH,// (MENU's tray) shows or hides CAMERA, when the touch lifts on it; held IOSTOUCH_MENU_HOLD, CAMERA's options
+  KIND_GAMES,    // (MENU's tray, more than one game found) "Switch game", when the touch lifts on it
 };
 
 // which modes a button shows in
@@ -212,7 +213,8 @@ typedef struct {
 // Holding MENU opens a tray just under it: LOOK (the look speed), ALWAYS
 // RUN, OPACITY, FPS (which shows or hides a frame rate readout by SAVE),
 // CAMERA (the camera symbol: shows or hides CAMERA; held, its options),
-// CHEAT, LEVEL (single player, in a level) and the keyboard. RESUME, in the middle, only while the game is paused. In
+// CHEAT, LEVEL (single player, in a level), GAMES (more than one game
+// found: "Switch game") and the keyboard. RESUME, in the middle, only while the game is paused. In
 // the menus: BACK top left, the arrows on the right, MENU (and its tray).
 enum {
   BTN_FIRE, BTN_USE,
@@ -222,7 +224,7 @@ enum {
   BTN_QUICKSAVE, BTN_QUICKLOAD, BTN_MENU,
   BTN_RESUME,
   BTN_BACK, BTN_MENUUP, BTN_MENUDOWN,
-  BTN_TRAYLOOK, BTN_TRAYRUN, BTN_TRAYOPACITY, BTN_TRAYFPS, BTN_TRAYCAM, BTN_TRAYCHEAT, BTN_TRAYLEVEL, BTN_TRAYKEYS, // MENU's tray (left to right), hidden unless it is open (LEVEL only in a level, single player)
+  BTN_TRAYLOOK, BTN_TRAYRUN, BTN_TRAYOPACITY, BTN_TRAYFPS, BTN_TRAYCAM, BTN_TRAYCHEAT, BTN_TRAYLEVEL, BTN_TRAYGAMES, BTN_TRAYKEYS, // MENU's tray (left to right), hidden unless it is open (LEVEL only in a level, single player)
   BTN_COUNT
 };
 static IOSTouchButton _aButtons[] = {
@@ -246,6 +248,7 @@ static IOSTouchButton _aButtons[] = {
   [BTN_TRAYCAM]   = { "",            KIND_CAMSWITCH, 0,                     20.0, 0, SHOW_ALL },
   [BTN_TRAYCHEAT] = { "CHEAT",       KIND_CHEATSWITCH, 0,                   20.0, 0, SHOW_ALL },
   [BTN_TRAYLEVEL] = { "LEVEL",       KIND_LEVELPICK, 0,                     20.0, 0, SHOW_PLAY },
+  [BTN_TRAYGAMES] = { "GAMES",       KIND_GAMES,    IOSTOUCH_REQ_GAMES,     20.0, 0, SHOW_ALL },
   [BTN_TRAYKEYS]  = { "",            KIND_KEYBOARD, IOSTOUCH_REQ_KEYBOARD,  20.0, 0, SHOW_ALL },
 };
 #define IOSTOUCH_NUM_BUTTONS ((int)(sizeof(_aButtons) / sizeof(_aButtons[0])))
@@ -435,15 +438,16 @@ static void IOSTouch_WheelGeometry(double W, double H, double inLeft, double inT
 }
 
 // MENU's tray along its row (IOSTouch_LayoutButtons found where): the
-// keyboard under MENU, then LEVEL (if it shows: bLevel), CHEAT, FPS,
-// OPACITY, ALWAYS RUN and LOOK to the left, IOSTOUCH_TRAY_STEP apart.
-// LEVEL hidden sits under CHEAT (nothing finds a hidden button).
+// keyboard under MENU, then GAMES (if it shows: iShown bit 1), LEVEL (bit
+// 0), CHEAT, CAMERA, FPS, OPACITY, ALWAYS RUN and LOOK to the left,
+// IOSTOUCH_TRAY_STEP apart. A hidden one sits under its neighbour (nothing
+// finds a hidden button). _bTrayLevelPlaced: the bits placed.
 static int _bTrayLevelPlaced = 0;
-static void IOSTouch_PlaceTray(int bLevel)
+static void IOSTouch_PlaceTray(int iShown)
 {
   int ctLeft = 0;
   for (int i = BTN_TRAYLAST; i >= BTN_TRAYFIRST; i--) {
-    if (i == BTN_TRAYLEVEL && !bLevel) {
+    if ((i == BTN_TRAYLEVEL && !(iShown & 1)) || (i == BTN_TRAYGAMES && !(iShown & 2))) {
       _aButtons[i].x = _fTrayKeysX - (ctLeft + 1) * IOSTOUCH_TRAY_STEP;
       _aButtons[i].y = _fTrayY;
       continue;
@@ -452,7 +456,7 @@ static void IOSTouch_PlaceTray(int bLevel)
     _aButtons[i].y = _fTrayY;
     ctLeft++;
   }
-  _bTrayLevelPlaced = bLevel != 0;
+  _bTrayLevelPlaced = iShown;
   _rTrayBack.bValid = 1;
   _rTrayBack.x0 = _aButtons[BTN_TRAYFIRST].x - 26;
   _rTrayBack.y0 = _fTrayY - 26;
@@ -783,6 +787,7 @@ static int IOSTouch_IsShown(int button)
   if (button == BTN_QUICKSAVE || button == BTN_QUICKLOAD) return !_hud.bNoSaves;
   if (button == BTN_CHEAT) return _bShowCheat;
   if (button == BTN_TRAYLEVEL) return _bTrayOpen && IOSTouch_LevelPickShows();
+  if (button == BTN_TRAYGAMES) return _bTrayOpen && _hud.bGames;
   if (button >= BTN_TRAYFIRST && button <= BTN_TRAYLAST) return _bTrayOpen;
   return 1;
 }
@@ -1023,8 +1028,8 @@ static void IOSTouch_OpenLevelList(void);
 static void IOSTouch_UseTrayButton(int button)
 {
   const int kind = _aButtons[button].kind;
-  if (kind == KIND_KEYBOARD || kind == KIND_ALWAYSRUN) {
-    _iRequests |= _aButtons[button].ulAction; // the iOS keyboard; Always Run on or off
+  if (kind == KIND_KEYBOARD || kind == KIND_ALWAYSRUN || kind == KIND_GAMES) {
+    _iRequests |= _aButtons[button].ulAction; // the iOS keyboard; Always Run on or off; "Switch game"
   }
   else if (kind == KIND_OPACITY) {
     _bOpacityOpen = !_bOpacityOpen; // its slider (the tray stays)
@@ -1217,7 +1222,8 @@ static void IOSTouch_CheatMoved(IOSTouchSlot *s, double x, double y)
 static void IOSTouch_TickCheat(double now, double known)
 {
   if (_bLevelListOpen && !IOSTouch_LevelPickShows()) IOSTouch_CloseLevelList();
-  if (IOSTouch_LevelPickShows() != _bTrayLevelPlaced) IOSTouch_PlaceTray(IOSTouch_LevelPickShows());
+  const int iTray = (IOSTouch_LevelPickShows() ? 1 : 0) | (_hud.bGames ? 2 : 0);
+  if (iTray != _bTrayLevelPlaced) IOSTouch_PlaceTray(iTray);
   if (_hud.uWorld != _uWorldSeen) {
     _uWorldSeen = _hud.uWorld;
     _bNoclip = 0;
@@ -3334,7 +3340,7 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     // The tray's buttons in its condensed letters, sized for the longest
     // (LOOK and OPACITY say what they are set to on a second line, set in
     // refreshButtonLooks)
-    for (int i = BTN_TRAYLOOK; i <= BTN_TRAYLEVEL; i++) {
+    for (int i = BTN_TRAYLOOK; i <= BTN_TRAYGAMES; i++) {
       aButtonViews[i].font = IOSTouch_TrayFont(IOSTouch_FontSize("ALWAYS\nRUN", _aButtons[i].radius));
     }
     // The tray's LOOK: the look speed kept (1x unless changed), its ring
@@ -4255,7 +4261,7 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
   const int iFpsWas = _iFpsShown;
   const int iShownWas = (_hud.bNoSaves != 0) * 16 + (_hud.bRunOn != 0) * 32 + (_hud.bAutomap != 0) * 64 + (_hud.bKeyboard != 0) * 128
                         + _bShowCheat * 256 + _bCheatOn * 512 + _bNoclip * 1024 + IOSTouch_CheatCanAct() * 2048
-                        + _bTrayLevelPlaced * 4096 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384
+                        + (_bTrayLevelPlaced & 1) * 4096 + ((_bTrayLevelPlaced >> 1) & 1) * 33554432 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384
                         + (_bShowCamera + 2 * (IOSCamera_Stage() != 0) + 4 * (IOSCamera_IsBusy() != 0)) * 4194304;
   IOSTouch_TickHolds(now);
   tLastTick = now;
@@ -4305,7 +4311,7 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
   // readout counts
   const int iShownNow = (_hud.bNoSaves != 0) * 16 + (_hud.bRunOn != 0) * 32 + (_hud.bAutomap != 0) * 64 + (_hud.bKeyboard != 0) * 128
                         + _bShowCheat * 256 + _bCheatOn * 512 + _bNoclip * 1024 + IOSTouch_CheatCanAct() * 2048
-                        + _bTrayLevelPlaced * 4096 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384
+                        + (_bTrayLevelPlaced & 1) * 4096 + ((_bTrayLevelPlaced >> 1) & 1) * 33554432 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384
                         + (_bShowCamera + 2 * (IOSCamera_Stage() != 0) + 4 * (IOSCamera_IsBusy() != 0)) * 4194304;
   if (_bTrayOpen != bTrayWasOpen || _iFpsShown != iFpsWas || iShownNow != iShownWas
       || opacityBack.hidden == (_bOpacityOpen && _bTrayOpen)) {

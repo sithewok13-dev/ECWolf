@@ -4,8 +4,16 @@
 // A card for each game found, side by side (scrolling where they don't all
 // fit), each in its own colours with an emblem, its name and subtitle, and
 // "LAST" on the one played last. A tap starts it.
+//
+// "Switch game" (the tray's GAMES, IOSGame.cpp): the same cards over the
+// game, "PLAYING" on the one being played, and Cancel. Picking another keeps
+// it (its name, the time), writes the settings and closes the app with a
+// local notification, "Tap to start <game>"; opening the app within 10
+// minutes (by the notification or not) starts it straight away, no picker
+// (IOSPicker_TakeNext). As the owner's Half-Life and Raze ports do.
 
 #import <UIKit/UIKit.h>
+#import <UserNotifications/UserNotifications.h>
 #include <stdio.h>
 #include <string.h>
 #include "IOSPicker.h"
@@ -58,7 +66,7 @@ static UIColor* RGB(const CGFloat c[3], CGFloat a)
 	CAGradientLayer* back;
 }
 
-- (instancetype)initWithName:(NSString*)name family:(int)fam last:(BOOL)last
+- (instancetype)initWithName:(NSString*)name family:(int)fam last:(BOOL)last mark:(NSString*)mark
 {
 	self = [super initWithFrame:CGRectZero];
 	if (!self) return nil;
@@ -101,7 +109,7 @@ static UIColor* RGB(const CGFloat c[3], CGFloat a)
 	if (last)
 	{
 		UILabel* l = [UILabel new];
-		l.text = @"LAST";
+		l.text = mark;
 		l.textAlignment = NSTextAlignmentCenter;
 		l.font = [UIFont systemFontOfSize:10 weight:UIFontWeightHeavy];
 		l.textColor = UIColor.blackColor;
@@ -144,6 +152,8 @@ static UIColor* RGB(const CGFloat c[3], CGFloat a)
 @property (nonatomic) int picked; // -1 until a card is tapped
 @property (nonatomic, copy) NSArray<NSString*>* names;
 @property (nonatomic) int last;
+@property (nonatomic) BOOL switching; // "Switch game": the one playing marked, and Cancel
+@property (nonatomic, copy) void (^done)(int picked); // (switching) a card or Cancel (-1)
 @end
 
 @implementation IOSPickController
@@ -151,6 +161,7 @@ static UIColor* RGB(const CGFloat c[3], CGFloat a)
 	UIScrollView* scroll;
 	NSMutableArray<IOSPickCard*>* cards;
 	UILabel* heading;
+	UIButton* cancel;
 	CAGradientLayer* backdrop;
 }
 
@@ -165,7 +176,16 @@ static UIColor* RGB(const CGFloat c[3], CGFloat a)
 	[self.view.layer addSublayer:backdrop];
 
 	heading = [UILabel new];
-	heading.text = @"Choose a game";
+	heading.text = self.switching ? @"Switch game" : @"Choose a game";
+	if (self.switching)
+	{
+		cancel = [UIButton buttonWithType:UIButtonTypeSystem];
+		[cancel setTitle:@"Cancel" forState:UIControlStateNormal];
+		cancel.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+		[cancel setTitleColor:[UIColor colorWithRed:1.0 green:0.82 blue:0.35 alpha:1.0] forState:UIControlStateNormal];
+		[cancel addTarget:self action:@selector(cancelTapped) forControlEvents:UIControlEventTouchUpInside];
+		[self.view addSubview:cancel];
+	}
 	heading.textColor = [UIColor colorWithWhite:1.0 alpha:0.9];
 	heading.font = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold];
 	[self.view addSubview:heading];
@@ -184,7 +204,8 @@ static UIColor* RGB(const CGFloat c[3], CGFloat a)
 	for (NSNumber* n in order)
 	{
 		const int i = n.intValue;
-		IOSPickCard* c = [[IOSPickCard alloc] initWithName:self.names[i] family:FamilyOfName(self.names[i]) last:(i == self.last)];
+		IOSPickCard* c = [[IOSPickCard alloc] initWithName:self.names[i] family:FamilyOfName(self.names[i]) last:(i == self.last)
+			mark:(self.switching ? @"PLAYING" : @"LAST")];
 		c.index = i;
 		[c addTarget:self action:@selector(cardTapped:) forControlEvents:UIControlEventTouchUpInside];
 		[scroll addSubview:c];
@@ -200,7 +221,8 @@ static UIColor* RGB(const CGFloat c[3], CGFloat a)
 	const CGRect b = self.view.bounds;
 	const CGFloat left = fmax(in.left, 16), right = fmax(in.right, 16);
 	const CGFloat top = fmax(in.top, 12), bottom = fmax(in.bottom, 12);
-	heading.frame = CGRectMake(left + 4, top, b.size.width - left - right, 32);
+	heading.frame = CGRectMake(left + 4, top, b.size.width - left - right - 100, 32);
+	cancel.frame = CGRectMake(b.size.width - right - 90, top, 90, 32);
 	scroll.frame = CGRectMake(0, top + 40, b.size.width, b.size.height - top - 40 - bottom);
 	const CGFloat gap = 14, h = fmin(scroll.frame.size.height - 8, 300);
 	const NSInteger n = cards.count;
@@ -222,6 +244,12 @@ static UIColor* RGB(const CGFloat c[3], CGFloat a)
 {
 	[[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
 	self.picked = card.index;
+	if (self.done) self.done(card.index);
+}
+
+- (void)cancelTapped
+{
+	if (self.done) self.done(-1);
 }
 
 - (BOOL)prefersStatusBarHidden
@@ -271,4 +299,112 @@ int IOSPicker_Run(const char* const* names, int ctNames, int iLast)
 		window.rootViewController = nil;
 		return picked;
 	}
+}
+
+// ---------------------------------------------------------------- switching
+
+#define KEY_NEXT_NAME @"wolf3dNextGameName"
+#define KEY_NEXT_TIME @"wolf3dNextGameTime"
+#define NEXT_GAME_TIME 600.0 // seconds
+
+int IOSPicker_TakeNext(const char* const* names, int ctNames)
+{
+	// its "tap to start" notification, if still there, has done its job
+	[[UNUserNotificationCenter currentNotificationCenter] removeAllDeliveredNotifications];
+	NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
+	NSString* name = [d stringForKey:KEY_NEXT_NAME];
+	const double age = NSDate.timeIntervalSinceReferenceDate - [d doubleForKey:KEY_NEXT_TIME];
+	[d removeObjectForKey:KEY_NEXT_NAME];
+	[d removeObjectForKey:KEY_NEXT_TIME];
+	if (!name || age < 0 || age > NEXT_GAME_TIME) return -1;
+	for (int i = 0; i < ctNames; i++)
+	{
+		if (names[i] && [name isEqualToString:@(names[i])])
+		{
+			printf("Game picker: the game switched to, %s\n", names[i]);
+			return i;
+		}
+	}
+	return -1;
+}
+
+static UIViewController* TopController(void)
+{
+	UIWindow* key = nil;
+	for (UIScene* s in UIApplication.sharedApplication.connectedScenes)
+	{
+		if (![s isKindOfClass:UIWindowScene.class]) continue;
+		for (UIWindow* w in ((UIWindowScene*)s).windows)
+			if (w.isKeyWindow) key = w;
+		if (!key) key = ((UIWindowScene*)s).windows.firstObject;
+	}
+	UIViewController* top = key.rootViewController;
+	while (top.presentedViewController) top = top.presentedViewController;
+	return top;
+}
+
+// The pick kept, the settings written, a "Tap to start" notification asked
+// for, and the app closed
+static void CloseForNext(NSString* title, void (*pfnSave)(void))
+{
+	NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
+	[d setObject:title forKey:KEY_NEXT_NAME];
+	[d setDouble:NSDate.timeIntervalSinceReferenceDate forKey:KEY_NEXT_TIME];
+	[d synchronize];
+	if (pfnSave) pfnSave();
+	printf("Switch game: %s, the app closes\n", title.UTF8String);
+	fflush(stdout);
+	UNUserNotificationCenter* center = UNUserNotificationCenter.currentNotificationCenter;
+	[center requestAuthorizationWithOptions:UNAuthorizationOptionAlert | UNAuthorizationOptionSound
+		completionHandler:^(BOOL granted, NSError* err) {
+		if (!granted)
+		{
+			// no notifications: say how it goes instead, then close
+			dispatch_async(dispatch_get_main_queue(), ^{
+				UIAlertController* alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Open Wolf3D again to start %@", title]
+					message:@"The app closes now. Your pick starts when you open it again (within 10 minutes)." preferredStyle:UIAlertControllerStyleAlert];
+				[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction* a) { exit(0); }]];
+				UIViewController* top = TopController();
+				if (top) [top presentViewController:alert animated:YES completion:nil];
+				else exit(0);
+			});
+			return;
+		}
+		UNMutableNotificationContent* content = [UNMutableNotificationContent new];
+		content.title = [NSString stringWithFormat:@"Tap to start %@", title];
+		content.body = @"Or open Wolf3D within 10 minutes.";
+		UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:@"wolf3d.nextgame" content:content
+			trigger:[UNTimeIntervalNotificationTrigger triggerWithTimeInterval:1 repeats:NO]];
+		[center addNotificationRequest:request withCompletionHandler:^(NSError* e2) {
+			dispatch_async(dispatch_get_main_queue(), ^{ exit(0); });
+		}];
+	}];
+}
+
+void IOSPicker_PresentSwitch(const char* const* names, int ctNames, int iNow, void (*pfnSave)(void), void (*pfnDone)(void))
+{
+	UIViewController* host = TopController();
+	if (!host || ctNames <= 0)
+	{
+		if (pfnDone) pfnDone();
+		return;
+	}
+	NSMutableArray<NSString*>* list = [NSMutableArray array];
+	for (int i = 0; i < ctNames; i++) [list addObject:[NSString stringWithUTF8String:names[i] ? names[i] : "?"] ?: @"?"];
+	IOSPickController* menu = [IOSPickController new];
+	menu.names = list;
+	menu.last = iNow;
+	menu.switching = YES;
+	menu.modalPresentationStyle = UIModalPresentationFullScreen;
+	__weak IOSPickController* weakMenu = menu;
+	menu.done = ^(int picked) {
+		if (picked >= 0 && picked < (int)list.count && picked != iNow)
+		{
+			CloseForNext(list[picked], pfnSave);
+			return; // (the cards stay up until the app closes)
+		}
+		[weakMenu dismissViewControllerAnimated:YES completion:nil];
+		if (pfnDone) pfnDone();
+	};
+	[host presentViewController:menu animated:YES completion:nil];
 }

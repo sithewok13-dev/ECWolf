@@ -280,7 +280,7 @@ if(ECWOLF_IOS)
 	target_include_directories(engine PRIVATE ${CMAKE_SOURCE_DIR}/ios)
 	# What SDL2, SDL2_mixer and the overlay need on iOS
 	foreach(fw UIKit Foundation OpenGLES QuartzCore CoreGraphics CoreFoundation AVFoundation AudioToolbox
-		CoreAudio CoreMotion GameController Metal CoreHaptics CoreBluetooth Photos ImageIO)
+		CoreAudio CoreMotion GameController Metal CoreHaptics CoreBluetooth Photos ImageIO UserNotifications)
 		target_link_libraries(engine PRIVATE "-framework ${fw}")
 	endforeach()
 	set_target_properties(engine PROPERTIES

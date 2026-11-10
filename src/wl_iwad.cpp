@@ -43,6 +43,9 @@
 #include "w_wad.h"
 #include "wl_iwad.h"
 #include "zstring.h"
+#ifdef ECWOLF_TOUCH
+void IOSGame_SetGames(const char *const *names, int ct, int current); // (ios/IOSGame.cpp)
+#endif
 #ifdef ECWOLF_IOSPATHS
 #include "IOSGameData.h"
 #endif
@@ -877,6 +880,15 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 		Quit();
 
 	config.GetSetting("DefaultIWad")->SetValue(pick);
+#ifdef ECWOLF_TOUCH
+	{
+		// (the tray's GAMES: the games found and the one being played)
+		TArray<const char*> names;
+		for(unsigned int i = 0;i < basefiles.Size();++i)
+			names.Push(basefiles[i].Name.GetChars());
+		IOSGame_SetGames(&names[0], names.Size(), pick);
+	}
+#endif
 
 	WadStuff &base = basefiles[pick];
 	selectedGame = &iwadTypes[base.Type];

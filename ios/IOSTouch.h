@@ -23,9 +23,10 @@
        weapon in the player's weapon slots (knife, pistol, machine gun, chain
        gun), with its picture from the game's own art and its ammo. The game
        holds still while it is open.
-     - MENU's tray: LOOK (0.5x to 3x), ALWAYS RUN, OPACITY, FPS, CHEAT,
-       LEVEL (the cheat on) and the keyboard (the iOS keyboard, typing into
-       the game), with the build stamp under it.
+     - MENU's tray: LOOK (0.5x to 3x), ALWAYS RUN, OPACITY, FPS, CAMERA,
+       CHEAT, LEVEL (in a level, single player), GAMES (more than one game
+       found: "Switch game") and the keyboard (the iOS keyboard, typing
+       into the game), with the build stamp under it.
      - the sithewok cheat: god mode, every weapon and key, ammo kept full;
        USE held 0.5 s: noclip; LEVEL: a list of the game's levels to go to.
    In ECWolf's menus, the title and story screens, intermissions and
@@ -62,6 +63,7 @@ typedef struct IOSTouchHud {
   int ctLevels;        /* the levels the cheat's LEVEL lists (IOSGame_LevelInfo), 0: none */
   int iLevelNow;       /* the one being played (1..ctLevels), 0: none of them */
   unsigned int uWorld; /* changes with every level started or loaded */
+  int bGames;          /* more than one game found: the tray's GAMES shows */
   float afHudFrame[4]; /* (filled by the overlay: IOSTouch_GetHudFrame) */
 } IOSTouchHud;
 
@@ -77,7 +79,8 @@ enum {
   IOSTOUCH_REQ_SAVEMENU  = 1 << 7, /* SAVE tapped: the game's Save Game menu */
   IOSTOUCH_REQ_LOADMENU  = 1 << 8, /* LOAD tapped: the game's Load Game menu */
   IOSTOUCH_REQ_CHEATSOUND = 1 << 9, /* the cheat came on: its sound */
-  IOSTOUCH_REQ_LEVEL     = 1 << 10, /* a level picked in the cheat's list (IOSTouch_TakeLevelPick) */
+  IOSTOUCH_REQ_LEVEL     = 1 << 10, /* a level picked in the list (IOSTouch_TakeLevelPick) */
+  IOSTOUCH_REQ_GAMES     = 1 << 11, /* the tray's GAMES: "Switch game" (IOSPicker_PresentSwitch) */
 };
 
 /* The keys the menus get (IOSTouch_TakeMenuKey), one at a time */

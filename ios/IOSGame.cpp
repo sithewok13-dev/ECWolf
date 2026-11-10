@@ -51,6 +51,9 @@
 
 #include "IOSGame.h"
 #include "IOSCamera.h"
+#ifdef ECWOLF_IOS
+#include "IOSPicker.h"
+#endif
 
 namespace GameSave
 {
@@ -64,6 +67,13 @@ static SDL_Window *gameWindow = NULL;
 static bool inPlay = false;
 static unsigned int framesDrawn = 0;
 static int lastMode = IOSTOUCH_HIDDEN; // (what IOSGame_Frame last showed)
+// The games found, the one played, "Switch game" up over the game (the
+// tray's GAMES, below)
+#define IOSGAME_MAX_GAMES 16
+static char gameNames[IOSGAME_MAX_GAMES][96];
+static int gameCount = 0, gameNow = -1;
+static bool switchOpen = false;
+static void SwitchGame();
 
 void IOSGame_SetWindow(SDL_Window *pWindow)
 {
@@ -890,6 +900,7 @@ void IOSGame_Frame()
 		hud.iLevelNow = CurrentLevel();
 	}
 	hud.uWorld = worldCount;
+	hud.bGames = gameCount > 1;
 	IOSTouch_SetWeapons(&wpn);
 	if(mode == IOSTOUCH_GAMEPLAY)
 		FeedIcons();
@@ -903,6 +914,8 @@ void IOSGame_Frame()
 
 	if(req & IOSTOUCH_REQ_MENU)
 		escapeWanted = true;
+	if(req & IOSTOUCH_REQ_GAMES)
+		SwitchGame();
 	if(req & IOSTOUCH_REQ_KEYBOARD)
 		IOSGame_TextInput(!SDL_IsTextInputActive());
 	if(mode == IOSTOUCH_GAMEPLAY)
@@ -1043,7 +1056,52 @@ void IOSGame_Ticcmd(bool bFirstTic)
 
 bool IOSGame_HoldsGame()
 {
-	return IOSTouch_HoldsGame() != 0 || IOSCamera_HoldsGame();
+	return IOSTouch_HoldsGame() != 0 || IOSCamera_HoldsGame() || switchOpen;
+}
+
+//---------------------------------------------------------------------------
+//
+// The tray's GAMES: "Switch game" (ios/IOSPicker.mm), the games found
+//
+//---------------------------------------------------------------------------
+
+void IOSGame_SetGames(const char *const *names, int ct, int current)
+{
+	gameCount = 0;
+	for(int i = 0;i < ct && i < IOSGAME_MAX_GAMES;i++)
+	{
+		snprintf(gameNames[i], sizeof(gameNames[i]), "%s", names[i] ? names[i] : "?");
+		gameCount++;
+	}
+	gameNow = current;
+	printf("iOS: %d games found, playing %d (%s)\n", gameCount, gameNow, gameNow >= 0 && gameNow < gameCount ? gameNames[gameNow] : "-");
+}
+
+#ifdef ECWOLF_IOS
+static void SwitchSave()
+{
+	WriteConfig(); // (the settings, ECWolf's own, before the app closes)
+}
+
+static void SwitchDone()
+{
+	switchOpen = false;
+}
+#endif
+
+static void SwitchGame()
+{
+	if(gameCount < 2 || switchOpen)
+		return;
+#ifdef ECWOLF_IOS
+	const char *names[IOSGAME_MAX_GAMES];
+	for(int i = 0;i < gameCount;i++)
+		names[i] = gameNames[i];
+	switchOpen = true;
+	IOSPicker_PresentSwitch(names, gameCount, gameNow, SwitchSave, SwitchDone);
+#else
+	printf("rig: Switch game: %d games, playing %d (%s)\n", gameCount, gameNow, gameNow >= 0 ? gameNames[gameNow] : "-");
+#endif
 }
 
 void IOSGame_FrameDone()

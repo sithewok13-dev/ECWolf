@@ -191,7 +191,9 @@ int I_PickIWad_Cocoa(WadStuff* wads, int numwads, bool showwin, int defaultiwad)
 		const char* names[64];
 		const int ct = numwads < 64 ? numwads : 64;
 		for (int i = 0; i < ct; i++) names[i] = wads[i].Name.GetChars();
-		int chosen = IOSPicker_Run(names, ct, defaultiwad);
+		// (picked in "Switch game" before the app closed: straight to it)
+		int chosen = IOSPicker_TakeNext(names, ct);
+		if (chosen < 0) chosen = IOSPicker_Run(names, ct, defaultiwad);
 		if (chosen == IOSPICKER_UNAVAILABLE)
 		{
 			NSMutableArray<NSString*>* titles = [NSMutableArray array];

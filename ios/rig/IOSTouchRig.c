@@ -102,7 +102,7 @@ static const struct { const char *name; int button; } _aRigNames[] = {
   { "MENU", BTN_MENU }, { "RESUME", BTN_RESUME }, { "BACK", BTN_BACK }, { "MENUUP", BTN_MENUUP },
   { "MENUDOWN", BTN_MENUDOWN }, { "TRAYLOOK", BTN_TRAYLOOK }, { "TRAYRUN", BTN_TRAYRUN },
   { "TRAYOPACITY", BTN_TRAYOPACITY }, { "TRAYFPS", BTN_TRAYFPS }, { "TRAYCHEAT", BTN_TRAYCHEAT },
-  { "TRAYLEVEL", BTN_TRAYLEVEL }, { "CAMERA", BTN_CAMERA }, { "TRAYCAM", BTN_TRAYCAM }, { "TRAYKEYS", BTN_TRAYKEYS },
+  { "TRAYLEVEL", BTN_TRAYLEVEL }, { "CAMERA", BTN_CAMERA }, { "TRAYCAM", BTN_TRAYCAM }, { "TRAYGAMES", BTN_TRAYGAMES }, { "TRAYKEYS", BTN_TRAYKEYS },
 };
 
 // The fingers: each a touch's identity (only its address is used)

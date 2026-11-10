@@ -65,6 +65,17 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   cinema|end|orbit y p|pan r d|zoom f|kinds n|selfies n|hash|status`,
   `@CAMERA`, `@TRAYCAM`; photos in `$IOSCAM_DIR`; `cam hash` (actors,
   map, clock, every RNG) is printed before and after each held stage.
+- **GAMES** (tray, only when more than one game is found; as the
+  Half-Life and Raze ports): "Switch game", the picker's cards over the
+  game (held still), "PLAYING" on the current one, Cancel
+  (`IOSPicker_PresentSwitch`). The current one or Cancel closes it.
+  Another: its name and the time kept (`wolf3dNextGameName/Time`),
+  ECWolf's settings written, the app closes with a local notification
+  "Tap to start <game>" (no permission: an alert says to open the app
+  again); opening the app within 10 minutes starts it, no picker
+  (`IOSPicker_TakeNext` in `I_PickIWad_Cocoa`). The games found come from
+  `wl_iwad.cpp` (`IOSGame_SetGames`). Rig: `@TRAYGAMES` prints
+  "rig: Switch game".
 - **The cheat (`sithewok`):** the tray's CHEAT shows the CHEAT button (top
   row, half way between the middle and SAVE) and switches the cheat on, or
   tapped again leaves cheat mode (off, button gone). CHEAT held 0.5 s
@@ -169,7 +180,8 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     cancels; SAVE wins a tie (LOAD's tap does nothing while SAVE is held);
     only a finished hold saves or loads.
   - MENU: tap = game menu; hold 0.45 s = tray with LOOK, ALWAYS RUN,
-    OPACITY, FPS, CAMERA, CHEAT, LEVEL (in a level, single player), keyboard, and the
+    OPACITY, FPS, CAMERA, CHEAT, LEVEL (in a level, single player), GAMES
+    (more than one game found), keyboard, and the
     build stamp under it in small dim text (not a button).
   - LOOK (tray): the drag's turning speed, shown on it ("LOOK 1x"); a tap
     steps 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3x (round to 0.5x); held 0.45 s

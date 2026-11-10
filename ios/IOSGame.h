@@ -33,6 +33,9 @@ void IOSGame_FrameDone();
 void IOSGame_FrameDrawn();
 void IOSGame_SetWindow(struct SDL_Window *pWindow);
 void IOSGame_WindowGone(struct SDL_Window *pWindow);
+// The games found (wl_iwad.cpp, once the one to play is known): for the
+// tray's GAMES ("Switch game"), shown when there is more than one
+void IOSGame_SetGames(const char *const *names, int ct, int current);
 // US_LineInput (a save's name...): the iOS keyboard comes up for it
 void IOSGame_TextInput(bool bOn);
 
