@@ -18,6 +18,9 @@
 #include "version.h"
 
 #include <SDL.h>
+#ifdef ECWOLF_TOUCH
+#include "IOSGame.h"
+#endif
 
 IVideo *Video = NULL;
 
@@ -697,11 +700,19 @@ SDLFB::SDLFB (int width, int height, bool fullscreen)
 	{
 		Screen = SDL_CreateWindow (GetGameCaption(),
 			SDL_WINDOWPOS_UNDEFINED_DISPLAY(vid_adapter), SDL_WINDOWPOS_UNDEFINED_DISPLAY(vid_adapter),
-			width, height, (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
+			width, height, (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0)
+#ifdef ECWOLF_IOS
+			// (iOS: the screen's own pixels, not its points)
+			| SDL_WINDOW_ALLOW_HIGHDPI
+#endif
+			);
 
 		if (Screen == NULL)
 			return;
 	}
+#ifdef ECWOLF_TOUCH
+	IOSGame_SetWindow(Screen);
+#endif
 
 #ifdef _WIN32
 	extern void ForceSDLFocus(SDL_Window *win);
@@ -769,6 +780,9 @@ SDLFB::~SDLFB ()
 
 	if(Screen)
 	{
+#ifdef ECWOLF_TOUCH
+		IOSGame_WindowGone(Screen);
+#endif
 		SDL_DestroyWindow (Screen);
 	}
 #endif
@@ -906,6 +920,14 @@ void SDLFB::Update ()
 		frameControls();
 #endif
 
+#ifdef ECWOLF_TOUCH
+		IOSGame_FrameDrawn();
+#endif
+#ifdef ECWOLF_IOS
+		// (the tray's FPS at 60: frames kept 1/60 s apart, i_ios.mm)
+		extern "C" void IOS_FrameCap(void);
+		IOS_FrameCap();
+#endif
 		SDL_RenderPresent(Renderer);
 		//SDLFlipCycles.Unclock();
 	}

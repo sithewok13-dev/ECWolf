@@ -43,6 +43,9 @@
 #include "w_wad.h"
 #include "wl_iwad.h"
 #include "zstring.h"
+#ifdef ECWOLF_IOSPATHS
+#include "IOSGameData.h"
+#endif
 
 bool queryiwad = true;
 static bool showpreviewgames = false;
@@ -312,6 +315,68 @@ static bool VerifySpearInstall(const char* directory)
 
 	return false;
 }
+
+#ifdef ECWOLF_IOSPATHS
+/* iOS: GOG's Spear of Destiny has its mission packs in folders of their
+ * own (M2, M3) with their files called *.SOD, as the first mission's. Each
+ * is named for what it is, in memory only (as for a GOG install above):
+ * a MAPHEAD.SOD shorter than the first mission's (402 bytes: 21 maps;
+ * the packs' list 6) is a mission pack; which one, the folder's name says
+ * ("M2", "Mission 3", "Return to Danger", "Ultimate Challenge"), or else the
+ * size of its GAMEMAPS (GOG's and the original's).
+ */
+static void IOS_NameMissionPack(const char* directory)
+{
+	const File dir(directory);
+	const FString mapheadName = dir.getInsensitiveFile("maphead.sod", false);
+	File maphead(dir, mapheadName);
+	if(!maphead.exists())
+		return;
+	long mapheadSize = 0, gamemapsSize = 0;
+	if(FILE *f = maphead.open("rb"))
+	{
+		fseek(f, 0, SEEK_END);
+		mapheadSize = ftell(f);
+		fclose(f);
+	}
+	if(mapheadSize <= 0 || mapheadSize >= 402)
+		return;
+	if(FILE *f = File(dir, dir.getInsensitiveFile("gamemaps.sod", false)).open("rb"))
+	{
+		fseek(f, 0, SEEK_END);
+		gamemapsSize = ftell(f);
+		fclose(f);
+	}
+
+	FString leaf = directory;
+	long slash = leaf.LastIndexOfAny("/\\");
+	if(slash >= 0)
+		leaf = leaf.Mid(slash+1);
+	leaf.ToLower();
+	int mission = 0;
+	if(leaf.IndexOf("danger") >= 0 || (leaf.Len() > 0 && leaf[leaf.Len()-1] == '2'))
+		mission = 2;
+	else if(leaf.IndexOf("challenge") >= 0 || (leaf.Len() > 0 && leaf[leaf.Len()-1] == '3'))
+		mission = 3;
+	else if(gamemapsSize == 135024)
+		mission = 2;
+	else if(gamemapsSize == 148534)
+		mission = 3;
+	if(!mission)
+	{
+		Printf("iOS: %s looks like a Spear of Destiny mission pack, but which one isn't known\n", directory);
+		return;
+	}
+
+	Printf("iOS: %s is Spear of Destiny mission %d\n", directory, mission);
+	TArray<FString> files = dir.getFileList();
+	for(unsigned int f = 0;f < files.Size();++f)
+	{
+		if(files[f].Len() > 4 && files[f].Right(4).CompareNoCase(".SOD") == 0)
+			File(dir, files[f]).rename(files[f].Left(files[f].Len()-4) + ".sd" + char('0' + mission));
+	}
+}
+#endif
 
 /* Find valid game data.  Due to the nature of WOlf3D we must collect
  * information by extensions.  An extension is considered valid if it has all
@@ -656,6 +721,20 @@ void SelectGame(TArray<FString> &wadfiles, const char* iwad, const char* datawad
 		split = newSplit+1;
 	}
 	while(split != 0);
+
+#ifdef ECWOLF_IOSPATHS
+	// iOS: the game's folders in the app's Documents (Files > On My iPhone >
+	// Wolf3D), as the player copied them (ios/IOSGameData.cpp)
+	{
+		static char folders[IOSGAMEDATA_MAX][IOSGAMEDATA_PATH];
+		const int ctFolders = IOSGameData_Folders(IOSGameData_Documents(), folders, IOSGAMEDATA_MAX);
+		for(int i = 0;i < ctFolders;++i)
+		{
+			IOS_NameMissionPack(folders[i]);
+			LookForGameData(datawadRes, basefiles, folders[i]);
+		}
+	}
+#endif
 
 #if !defined(__APPLE__) && !defined(_WIN32)
 	LookForGameData(datawadRes, basefiles, "/usr/share/games/wolf3d");

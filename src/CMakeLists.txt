@@ -262,7 +262,33 @@ if(NO_GTK)
 	target_compile_definitions(engine PRIVATE -DNO_GTK=1)
 endif()
 
-if(APPLE)
+if(ECWOLF_IOS)
+	# iOS: the app around the game (i_ios.mm: start, paths, the first screen,
+	# the alerts; IOSPicker.mm: the game picker), the touch controls
+	# (IOSTouch.m, Objective-C with ARC; IOSGame.cpp, the game side) and the
+	# search for the player's files (IOSGameData.cpp)
+	set(IOS_SOURCES ../ios/i_ios.mm ../ios/IOSPicker.mm ../ios/IOSTouch.m ../ios/IOSGame.cpp ../ios/IOSGameData.cpp)
+	target_sources(engine PRIVATE ${IOS_SOURCES})
+	set_source_files_properties(../ios/i_ios.mm ../ios/IOSPicker.mm PROPERTIES COMPILE_FLAGS "-std=gnu++17 -fobjc-arc")
+	set_source_files_properties(../ios/IOSTouch.m PROPERTIES COMPILE_FLAGS "-x objective-c -fobjc-arc")
+	set_source_files_properties(../ios/IOSGame.cpp ../ios/IOSGameData.cpp PROPERTIES COMPILE_FLAGS "-std=gnu++11")
+	target_compile_definitions(engine PRIVATE ECWOLF_IOS=1 ECWOLF_TOUCH=1 ECWOLF_IOSPATHS=1)
+	target_include_directories(engine PRIVATE ${CMAKE_SOURCE_DIR}/ios)
+	# What SDL2, SDL2_mixer and the overlay need on iOS
+	foreach(fw UIKit Foundation OpenGLES QuartzCore CoreGraphics CoreFoundation AVFoundation AudioToolbox
+		CoreAudio CoreMotion GameController Metal CoreHaptics CoreBluetooth)
+		target_link_libraries(engine PRIVATE "-framework ${fw}")
+	endforeach()
+	set_target_properties(engine PROPERTIES
+		MACOSX_BUNDLE ON
+		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/ios/Info.plist.in"
+		MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.sithewok13.wolf3d"
+		MACOSX_BUNDLE_BUNDLE_NAME "Wolf3D"
+		MACOSX_BUNDLE_SHORT_VERSION_STRING "${ECWOLF_IOS_VERSION}"
+		MACOSX_BUNDLE_BUNDLE_VERSION "${ECWOLF_IOS_VERSION}"
+		XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+	)
+elseif(APPLE)
 	target_sources(engine PRIVATE
 		macosx/filesys.mm
 		macosx/i_main.mm
@@ -297,6 +323,23 @@ elseif(ANDROID)
 		GLESv1_CM
 		log
 	)
+endif()
+
+if(ECWOLF_TOUCH_RIG_SOURCE AND NOT ECWOLF_IOS)
+	# The Linux rig (ios/rig): the touch controls' C core through the rig's
+	# file, the game side and the iOS data search, on the desktop build
+	target_sources(engine PRIVATE ../ios/IOSGame.cpp ../ios/IOSGameData.cpp ${ECWOLF_TOUCH_RIG_SOURCE})
+	set_source_files_properties(${ECWOLF_TOUCH_RIG_SOURCE} PROPERTIES COMPILE_FLAGS "-DIOSTOUCH_RIG")
+	set_source_files_properties(../ios/IOSGame.cpp ../ios/IOSGameData.cpp PROPERTIES COMPILE_FLAGS "-std=gnu++11")
+	target_compile_definitions(engine PRIVATE ECWOLF_TOUCH=1 ECWOLF_IOSRIG=1 ECWOLF_IOSPATHS=1)
+	target_include_directories(engine PRIVATE ${CMAKE_SOURCE_DIR}/ios)
+endif()
+
+# (iOS: the app is Wolf3D.app)
+if(ECWOLF_IOS)
+	set(ENGINE_OUTPUT_NAME Wolf3D)
+else()
+	set(ENGINE_OUTPUT_NAME "${ENGINE_BINARY_NAME}")
 endif()
 
 # Derive version info and generate header
@@ -340,7 +383,7 @@ target_include_directories(engine PRIVATE
 
 set_target_properties(engine PROPERTIES
 	CXX_STANDARD 98
-	OUTPUT_NAME "${ENGINE_BINARY_NAME}"
+	OUTPUT_NAME "${ENGINE_OUTPUT_NAME}"
 	RUNTIME_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
 	# On Linux look for any libraries we link against in the executable directory.
 	INSTALL_RPATH "\$ORIGIN"

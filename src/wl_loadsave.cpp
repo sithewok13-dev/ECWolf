@@ -527,6 +527,72 @@ void QuickLoadOrSave(bool load)
 	ShowMenu(load ? loadGame : saveGame);
 }
 
+#ifdef ECWOLF_TOUCH
+// The touch controls' QUICK SAVE and QUICK LOAD (ios/IOSGame.cpp), held to
+// act, so without F8's and F9's question. The quick slot is ECWolf's own:
+// the save last saved or loaded; with none yet, the one called "Quicksave"
+// (a new one is made at the first QUICK SAVE).
+static const char *const TOUCH_QUICKSAVE = "Quicksave";
+
+static int TouchQuickPosition()
+{
+	int pos = saveGame.getCurrentPosition();
+	if(pos == 0)
+	{
+		for(unsigned int i = SaveFile::files.Size();i-- > 0;)
+		{
+			if(SaveFile::files[i].name.Compare(TOUCH_QUICKSAVE) == 0 && SaveFile::files[i].hasFiles
+				&& !SaveFile::files[i].oldVersion && !SaveFile::files[i].hide)
+			{
+				// (the menus' items for slot i)
+				for(int j = 1;j < saveGame.getNumItems();j++)
+				{
+					if(static_cast<SaveSlotMenuItem *>(saveGame.getIndex(j))->slotIndex == i)
+					{
+						pos = j;
+						break;
+					}
+				}
+				break;
+			}
+		}
+	}
+	return pos;
+}
+
+const char *TouchQuickSave()
+{
+	static FString name;
+	int pos = TouchQuickPosition();
+	if(pos == 0)
+		static_cast<SaveSlotMenuItem *>(saveGame.getIndex(0))->setValue(TOUCH_QUICKSAVE);
+	else
+		saveGame.setCurrentPosition(pos);
+	quickSaveLoad = true;
+	PerformSaveGame(pos);
+	quickSaveLoad = false;
+	pos = saveGame.getCurrentPosition();
+	if(pos <= 0)
+		return NULL;
+	name = SaveFile::files[static_cast<SaveSlotMenuItem *>(saveGame.getIndex(pos))->slotIndex].name;
+	return name.GetChars();
+}
+
+int TouchQuickLoad()
+{
+	const int pos = TouchQuickPosition();
+	if(pos <= 0)
+		return 0;
+	const SaveFile &file = SaveFile::files[static_cast<SaveSlotMenuItem *>(saveGame.getIndex(pos))->slotIndex];
+	if(file.oldVersion || !file.hasFiles)
+		return -1;
+	quickSaveLoad = true;
+	LoadSaveGame(pos-1);
+	quickSaveLoad = false;
+	return 1;
+}
+#endif
+
 static void Serialize(FArchive &arc)
 {
 	short difficulty;

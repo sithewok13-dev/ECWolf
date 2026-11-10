@@ -631,6 +631,17 @@ void Scale3DSprite(AActor *actor, const Frame *frame, unsigned height)
 	}
 }
 
+FTexture *R_GetFrameTexture(const Frame *frame)
+{
+	if(!frame || frame->spriteInf == SPR_NONE || frame->spriteInf >= loadedSprites.Size()
+		|| frame->frame >= loadedSprites[frame->spriteInf].numFrames)
+		return NULL;
+	const Sprite &spr = spriteFrames[loadedSprites[frame->spriteInf].frames+frame->frame];
+	if(spr.rotations == Sprite::NO_FRAMES || !spr.texture[0].isValid())
+		return NULL;
+	return TexMan[spr.texture[0]];
+}
+
 void R_DrawPlayerSprite(AActor *actor, const Frame *frame, fixed offsetX, fixed offsetY)
 {
 	if(frame->spriteInf == SPR_NONE || loadedSprites[frame->spriteInf].numFrames == 0)

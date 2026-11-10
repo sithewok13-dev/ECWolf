@@ -27,6 +27,9 @@
 #include "id_in.h"
 #include "id_vh.h"
 #include "id_us.h"
+#ifdef ECWOLF_TOUCH
+#include "IOSGame.h"
+#endif
 
 #if _MSC_VER == 1200            // Visual C++ 6
 	#define vsnprintf _vsnprintf
@@ -383,6 +386,11 @@ bool US_LineInput(FFont *font, int x,int y,char *buf,const char *def,bool escok,
 	if(ingame)
 		Net::BlockPlaysim();
 
+#ifdef ECWOLF_TOUCH
+	// (iOS: the keyboard comes up to type the name)
+	IOSGame_TextInput(true);
+#endif
+
 	double clearx = x-1, cleary = y, clearw = maxwidth, clearh = font->GetHeight();
 	MenuToRealCoords(clearx, cleary, clearw, clearh, MENU_CENTER);
 
@@ -645,5 +653,8 @@ bool US_LineInput(FFont *font, int x,int y,char *buf,const char *def,bool escok,
 	VW_UpdateScreen();
 
 	IN_ClearKeysDown();
+#ifdef ECWOLF_TOUCH
+	IOSGame_TextInput(false);
+#endif
 	return(result);
 }

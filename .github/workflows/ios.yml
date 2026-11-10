@@ -1,0 +1,181 @@
+# Builds an unsigned Wolf3D-ios.ipa (ECWolf for iPhone and iPad: Wolfenstein
+# 3D, Spear of Destiny and its mission packs), with touch controls.
+# Sideload it, then copy your own game files into Files > On My iPhone >
+# Wolf3D. No game data is in the app (only ECWolf's own ecwolf.pk3).
+#
+# Every run keeps the .ipa as a workflow artifact. Builds of the ios branch
+# also update the public "ios-latest" prerelease (Wolf3D-ios.ipa, no game
+# data); runs on other ios-* branches (work in progress) publish nothing.
+# (Modelled on the owner's UZDoom and Raze ports, .github/workflows/ios.yml.)
+name: iOS
+
+on:
+  push:
+    branches: [ "ios", "ios-*" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IOS_MIN: "15.0"
+  SDL_TAG: release-2.32.8
+  MIXER_TAG: release-2.8.1
+  NET_TAG: release-2.2.0
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    outputs:
+      build_date: ${{ steps.stamp.outputs.date }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+
+    - name: Select newest Xcode
+      run: |
+        set -e
+        XCODE=$(ls -d /Applications/Xcode_*.app | grep -iv beta | sort -V | tail -1)
+        echo "Using $XCODE"
+        sudo xcode-select -s "$XCODE/Contents/Developer"
+        xcodebuild -version
+        xcrun --sdk iphoneos --show-sdk-version
+
+    - name: Host tools
+      run: brew install ninja
+
+    - name: Restore iOS dependencies
+      id: deps
+      uses: actions/cache/restore@v4
+      with:
+        path: deps-ios
+        key: ios-deps-${{ env.SDL_TAG }}-${{ env.MIXER_TAG }}-${{ env.NET_TAG }}-${{ env.IOS_MIN }}-${{ hashFiles('ios/build_deps.sh') }}
+
+    - name: Build SDL2, SDL2_mixer and SDL2_net for iOS
+      if: steps.deps.outputs.cache-hit != 'true'
+      run: ios/build_deps.sh "$PWD/deps-ios"
+
+    - name: Save iOS dependencies
+      if: steps.deps.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: deps-ios
+        key: ${{ steps.deps.outputs.cache-primary-key }}
+
+    # zipdir (which makes ecwolf.pk3 from wadsrc/) runs on the Mac
+    - name: Build host tools
+      run: |
+        set -e
+        cmake -S . -B host -G Ninja -DCMAKE_BUILD_TYPE=Release -DTOOLS_ONLY=ON \
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5 > host-configure.log 2>&1 || { tail -60 host-configure.log; exit 1; }
+        cmake --build host --target zipdir
+        test -f host/ImportExecutables.cmake
+
+    - name: Configure
+      run: |
+        set -e
+        DEPS=$PWD/deps-ios
+        # Homebrew's pkg-config would hand the iOS build Mac libraries: hide them
+        export PKG_CONFIG_LIBDIR=/nonexistent PKG_CONFIG_PATH=
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=$IOS_MIN -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+          -DIMPORT_EXECUTABLES=$PWD/host/ImportExecutables.cmake \
+          -DINTERNAL_JPEG=ON \
+          -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON -DCMAKE_DISABLE_FIND_PACKAGE_SDL2_mixer=ON -DCMAKE_DISABLE_FIND_PACKAGE_SDL2_net=ON \
+          "-DSDL2_LIBRARIES=$DEPS/lib/libSDL2main.a;$DEPS/lib/libSDL2.a" -DSDL2_INCLUDE_DIRS=$DEPS/include/SDL2 \
+          -DSDL2_mixer_LIBRARIES=$DEPS/lib/libSDL2_mixer.a -DSDL2_mixer_INCLUDE_DIRS=$DEPS/include/SDL2 \
+          -DSDL2_net_LIBRARIES=$DEPS/lib/libSDL2_net.a -DSDL2_net_INCLUDE_DIRS=$DEPS/include/SDL2 \
+          "-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local" \
+          -DECWOLF_IOS_VERSION=0.1.${{ github.run_number }}
+
+    - name: Build
+      run: |
+        cmake --build build -- -k 0 > build.log 2>&1 || {
+          grep -E "error:|FAILED:|undefined symbol|ld: |CMake Error" build.log | head -120
+          echo "----- end of the build log -----"
+          tail -80 build.log | cut -c1-400
+          echo "::error::Build failed"
+          exit 1
+        }
+        grep -E "(ios/).*warning:" build.log | sort -u | head -60 || true
+        tail -3 build.log
+
+    # The build stamp: the run number and the date (UTC), shown under the
+    # open MENU tray as "build 80 · Nov 9" and on the release's first line
+    - name: Build stamp
+      id: stamp
+      run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+    - name: Package .ipa
+      run: |
+        set -e
+        APP=$(find build -maxdepth 3 -name "Wolf3D.app" -type d | head -1)
+        echo "App bundle: $APP"
+        test -n "$APP"
+        test -f "$APP/Wolf3D"
+        test -f "$APP/ecwolf.pk3"
+        # The icon: ECWolf's own, in the sizes iOS asks for
+        SRC=src/macosx/icon.iconset/icon_512x512.png
+        sips -z 120 120 "$SRC" --out "$APP/AppIcon60x60@2x.png" > /dev/null
+        sips -z 180 180 "$SRC" --out "$APP/AppIcon60x60@3x.png" > /dev/null
+        sips -z 152 152 "$SRC" --out "$APP/AppIcon76x76@2x~ipad.png" > /dev/null
+        sips -z 167 167 "$SRC" --out "$APP/AppIcon83.5x83.5@2x~ipad.png" > /dev/null
+        PL="$APP/Info.plist"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$PL"
+        /usr/libexec/PlistBuddy -c "Delete :SWBuildNumber" "$PL" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Delete :SWBuildDate" "$PL" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :SWBuildNumber string ${{ github.run_number }}" "$PL"
+        /usr/libexec/PlistBuddy -c "Add :SWBuildDate string ${{ steps.stamp.outputs.date }}" "$PL"
+        plutil -lint "$PL"
+        plutil -p "$PL" | grep -E "CFBundle(Identifier|Name|DisplayName|(Short)?Version)|SWBuild"
+        ls -la "$APP"
+        codesign --force --sign - --timestamp=none "$APP"
+        mkdir -p ipa/Payload
+        cp -R "$APP" ipa/Payload/
+        # No game data in the app: none of the games' files may be in it
+        BAD=$(find ipa/Payload -type f \( -iname '*.wl1' -o -iname '*.wl3' -o -iname '*.wl6' -o -iname '*.sdm' -o -iname '*.sod' \
+          -o -iname '*.sd1' -o -iname '*.sd2' -o -iname '*.sd3' -o -iname '*.n3d' \) )
+        if [ -n "$BAD" ]; then echo "$BAD"; echo "::error::Game data is in the app"; exit 1; fi
+        (cd ipa && zip -qry ../Wolf3D-ios.ipa Payload)
+        ls -la Wolf3D-ios.ipa
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: Wolf3D-ios
+        path: Wolf3D-ios.ipa
+
+  release:
+    name: Publish to "iOS latest" prerelease
+    needs: build
+    if: github.ref == 'refs/heads/ios'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: Wolf3D-ios
+        path: out
+
+    - name: Publish to "ios-latest" prerelease
+      uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+      with:
+        tag_name: ios-latest
+        target_commitish: ${{ github.sha }}
+        name: iOS latest build
+        prerelease: true
+        make_latest: false
+        body: |
+          Build ${{ github.run_number }} · ${{ needs.build.outputs.build_date }}
+          Development build of Wolf3D (ECWolf) for iPhone and iPad, rebuilt after every push to the `ios` branch (run ${{ github.run_number }}, commit ${{ github.sha }}). It may not have been tried yet.
+          Wolf3D-ios.ipa is unsigned: sideload it (for example with Feather), then copy your own game files (Wolfenstein 3D, Spear of Destiny and its mission packs, from GOG, Steam or CD) into Files > On My iPhone > Wolf3D. No game data is included.
+        files: out/Wolf3D-ios.ipa

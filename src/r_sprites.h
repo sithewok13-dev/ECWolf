@@ -48,6 +48,8 @@ enum SpecialSprites
 bool R_CheckSpriteValid(unsigned int spr);
 class FTexture *R_GetAMSprite(AActor *actor, angle_t rotangle, bool &flip);
 unsigned int R_GetSprite(const char* spr);
+// The picture a state shows (its first rotation), or NULL
+FTexture *R_GetFrameTexture(const Frame *frame);
 void R_GetSpriteHitlist(BYTE* hitlist);
 void R_InitSprites();
 void R_LoadSprite(const FString &name);

@@ -1339,6 +1339,11 @@ int WL_Main (int argc, char *argv[])
 #ifdef _WIN32
 		I_AcknowledgeError();
 #endif
+#ifdef ECWOLF_IOS
+		// (iOS: an alert says what went wrong before the app ends: i_ios.mm)
+		extern void IOS_FatalError(const char *text);
+		IOS_FatalError(error.GetMessage());
+#endif
 
 		return 1;
 	}

@@ -174,7 +174,11 @@ void ReadConfig(void)
 	config.CreateSetting("ForceGrabMouse", false);
 	config.CreateSetting("MouseEnabled", 1);
 	config.CreateSetting("JoystickEnabled", true);
+#ifdef ECWOLF_IOS
+	config.CreateSetting("ViewSize", 20); // (iOS: the view as wide as the status bar)
+#else
 	config.CreateSetting("ViewSize", 19);
+#endif
 	config.CreateSetting("MouseXAdjustment", 5);
 	config.CreateSetting("MouseYAdjustment", 5);
 	config.CreateSetting("PanXAdjustment", 5);
@@ -188,9 +192,26 @@ void ReadConfig(void)
 	config.CreateSetting("SoundVolume", MAX_VOLUME);
 	config.CreateSetting("MusicVolume", MAX_VOLUME);
 	config.CreateSetting("DigitizedVolume", MAX_VOLUME);
+#ifdef ECWOLF_IOS
+	// iOS: the whole screen, at its own resolution, in step with it
+	{
+		extern "C" void IOS_ScreenPixels(int *w, int *h);
+		int w = 0, h = 0;
+		IOS_ScreenPixels(&w, &h);
+		if(w >= 320 && h >= 200)
+		{
+			fullScreenWidth = w;
+			fullScreenHeight = h;
+		}
+	}
+	config.CreateSetting("Vid_FullScreen", true);
+	config.CreateSetting("Vid_Aspect", ASPECT_NONE);
+	config.CreateSetting("Vid_Vsync", true);
+#else
 	config.CreateSetting("Vid_FullScreen", false);
 	config.CreateSetting("Vid_Aspect", ASPECT_NONE);
 	config.CreateSetting("Vid_Vsync", false);
+#endif
 	config.CreateSetting("FullScreenWidth", fullScreenWidth);
 	config.CreateSetting("FullScreenHeight", fullScreenHeight);
 	config.CreateSetting("WindowedScreenWidth", windowedScreenWidth);
@@ -255,6 +276,9 @@ void ReadConfig(void)
 	MusicVolume = config.GetSetting("MusicVolume")->GetInteger();
 	SoundVolume = config.GetSetting("DigitizedVolume")->GetInteger();
 	vid_fullscreen = config.GetSetting("Vid_FullScreen")->GetInteger() != 0;
+#ifdef ECWOLF_IOS
+	vid_fullscreen = true; // (an iPhone has no windows)
+#endif
 	vid_aspect = static_cast<Aspect>(config.GetSetting("Vid_Aspect")->GetInteger());
 	vid_vsync = config.GetSetting("Vid_Vsync")->GetInteger() != 0;
 	fullScreenWidth = config.GetSetting("FullScreenWidth")->GetInteger();

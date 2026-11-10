@@ -33,6 +33,10 @@
 */
 
 #include <cstdlib>
+#include <cstdio>
+#ifdef ECWOLF_IOSRIG
+#include "IOSGameData.h"
+#endif
 
 #ifndef NO_GTK
 #include <gtk/gtk.h>
@@ -48,6 +52,23 @@ int main(int argc, char *argv[])
 
 #ifndef NO_GTK
 	GtkAvailable = gtk_init_check(&argc, &argv);
+#endif
+
+#ifdef ECWOLF_IOSRIG
+	// The rig (ios/rig): the iOS app's first screen while no game files are
+	// in its Documents (IOSRIG_DOCUMENTS here)
+	{
+		static char folders[IOSGAMEDATA_MAX][IOSGAMEDATA_PATH];
+		const int ct = IOSGameData_Folders(IOSGameData_Documents(), folders, IOSGAMEDATA_MAX);
+		printf("rig: game data folders %d\n", ct);
+		for(int i = 0;i < ct;i++)
+			printf("rig:   %s\n", folders[i]);
+		if(ct == 0)
+		{
+			printf("rig: first screen: %s\n%s\n", IOSGameData_HelpTitle(), IOSGameData_HelpText());
+			return 3;
+		}
+	}
 #endif
 
 	extern int WL_Main(int argc, char *argv[]);

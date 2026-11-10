@@ -27,6 +27,9 @@
 #include "g_mapinfo.h"
 #include "a_inventory.h"
 #include "am_map.h"
+#ifdef ECWOLF_TOUCH
+#include "IOSGame.h"
+#endif
 
 /*
 =============================================================================
@@ -577,6 +580,10 @@ void PollControls (bool absolutes)
 	pollAndroidControls();
 #endif
 
+#ifdef ECWOLF_TOUCH
+	IOSGame_Ticcmd(absolutes);
+#endif
+
 	if (demorecord)
 	{
 		//
@@ -698,6 +705,10 @@ void CheckKeys (void)
 
 	if (screenfaded || demoplayback)    // don't do anything with a faded screen
 		return;
+
+#ifdef ECWOLF_TOUCH
+	IOSGame_CheckKeys(); // (QUICK SAVE, QUICK LOAD)
+#endif
 
 	scan = LastScan;
 
@@ -1016,7 +1027,14 @@ void PlayFrame()
 
 	if (screenfaded)
 	{
+#ifdef ECWOLF_TOUCH
+		// (the fade's own event pumping is the level's: the controls stay)
+		IOSGame_SetInPlay(true);
 		VW_FadeIn ();
+		IOSGame_SetInPlay(false);
+#else
+		VW_FadeIn ();
+#endif
 		ResetTimeCount();
 	}
 
@@ -1066,7 +1084,13 @@ void PlayLoop (void)
 
 	do
 	{
+#ifdef ECWOLF_TOUCH
+		IOSGame_SetInPlay(true); // (the touch controls show for these frames)
 		ProcessEvents();
+		IOSGame_SetInPlay(false);
+#else
+		ProcessEvents();
+#endif
 
 //
 // actor thinking
@@ -1082,7 +1106,11 @@ void PlayLoop (void)
 			if(playstate != ex_stillplaying)
 				break;
 
+#ifdef ECWOLF_TOUCH
+			if(!Paused && !IOSGame_HoldsGame()) // (the weapon wheel holds it still)
+#else
 			if(!Paused)
+#endif
 			{
 				++gamestate.TimeCount;
 

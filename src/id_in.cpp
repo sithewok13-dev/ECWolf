@@ -27,6 +27,9 @@
 #include "config.h"
 #include "wl_net.h"
 #include "wl_play.h"
+#ifdef ECWOLF_TOUCH
+#include "IOSGame.h"
+#endif
 
 
 #if !SDL_VERSION_ATLEAST(2,0,0)
@@ -533,7 +536,16 @@ void IN_WaitAndProcessEvents()
 
 	if(Net::InitVars.mode == Net::MODE_SinglePlayer)
 	{
+#ifdef ECWOLF_TOUCH
+		// (the touch controls tick once a frame: never wait long for a key)
+		if(!SDL_WaitEventTimeout(&event, 16))
+		{
+			IOSGame_Frame();
+			return;
+		}
+#else
 		if(!SDL_WaitEvent(&event)) return;
+#endif
 	}
 	else
 	{
@@ -551,6 +563,9 @@ void IN_WaitAndProcessEvents()
 		processEvent(&event);
 	}
 	while(SDL_PollEvent(&event));
+#ifdef ECWOLF_TOUCH
+	IOSGame_Frame();
+#endif
 }
 
 void IN_ProcessEvents()
@@ -570,6 +585,9 @@ void IN_ProcessEvents()
 	{
 		processEvent(&event);
 	}
+#ifdef ECWOLF_TOUCH
+	IOSGame_Frame();
+#endif
 }
 
 

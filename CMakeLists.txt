@@ -7,6 +7,16 @@ endif()
 
 include(src/versiondefs.cmake)
 
+# iOS (iPhone/iPad): the app "Wolf3D" (ios/: the touch controls, the first
+# screen, the game picker; SDL2 and its libraries from ios/build_deps.sh)
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	set(ECWOLF_IOS ON)
+endif()
+# The Linux test rig for the iOS code (ios/rig): the touch controls' C core,
+# the game side and the iOS data search, without UIKit
+set(ECWOLF_TOUCH_RIG_SOURCE "" CACHE FILEPATH "Linux test rig for the iOS touch controls (a C file)")
+set(ECWOLF_IOS_VERSION "0.1" CACHE STRING "The iOS app's version")
+
 # Set the default MSVC runtime library for newer CMake versions that support it
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.15.0" AND MSVC)
 	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library to compile against")
