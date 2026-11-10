@@ -212,7 +212,7 @@ typedef struct {
 // Holding MENU opens a tray just under it: LOOK (the look speed), ALWAYS
 // RUN, OPACITY, FPS (which shows or hides a frame rate readout by SAVE),
 // CAMERA (the camera symbol: shows or hides CAMERA; held, its options),
-// CHEAT, LEVEL (while the cheat is on, in a level) and the keyboard. RESUME, in the middle, only while the game is paused. In
+// CHEAT, LEVEL (single player, in a level) and the keyboard. RESUME, in the middle, only while the game is paused. In
 // the menus: BACK top left, the arrows on the right, MENU (and its tray).
 enum {
   BTN_FIRE, BTN_USE,
@@ -222,7 +222,7 @@ enum {
   BTN_QUICKSAVE, BTN_QUICKLOAD, BTN_MENU,
   BTN_RESUME,
   BTN_BACK, BTN_MENUUP, BTN_MENUDOWN,
-  BTN_TRAYLOOK, BTN_TRAYRUN, BTN_TRAYOPACITY, BTN_TRAYFPS, BTN_TRAYCAM, BTN_TRAYCHEAT, BTN_TRAYLEVEL, BTN_TRAYKEYS, // MENU's tray (left to right), hidden unless it is open (LEVEL only while the cheat is on, in a level)
+  BTN_TRAYLOOK, BTN_TRAYRUN, BTN_TRAYOPACITY, BTN_TRAYFPS, BTN_TRAYCAM, BTN_TRAYCHEAT, BTN_TRAYLEVEL, BTN_TRAYKEYS, // MENU's tray (left to right), hidden unless it is open (LEVEL only in a level, single player)
   BTN_COUNT
 };
 static IOSTouchButton _aButtons[] = {
@@ -767,11 +767,11 @@ static int _bFpsBase = 0;
 static unsigned int _ulFpsFrames = 0;
 static double _tFpsBase = 0.0;
 static int _iFpsShown = -1;
-// Whether the tray's LEVEL is in the tray: the cheat on, in a level of a
-// game that allows it, with levels to list
+// Whether the tray's LEVEL is in the tray: single player (cheat or not), in a level
+// with levels to list
 static int IOSTouch_LevelPickShows(void)
 {
-  return _bCheatOn && _hud.bCheatAllowed && _hud.ctLevels > 0 && _iMode == IOSTOUCH_GAMEPLAY;
+  return _hud.bCheatAllowed && _hud.ctLevels > 0 && _iMode == IOSTOUCH_GAMEPLAY; // (single player, cheat or not)
 }
 
 // Whether a button shows now
@@ -1175,7 +1175,7 @@ static int IOSTouch_CheatCanAct(void)
 static void IOSTouch_OpenLevelList(void)
 {
   IOSTouch_SetTrayOpen(0);
-  if (!IOSTouch_CheatCanAct() || !IOSTouch_LevelPickShows()) return;
+  if (!IOSTouch_LevelPickShows()) return;
   IOSTouch_DropTouches();
   _bLevelListOpen = 1;
 }
@@ -1191,7 +1191,7 @@ static void IOSTouch_PickLevel(int iLevel)
 {
   const int bOpen = _bLevelListOpen;
   _bLevelListOpen = 0;
-  if (!bOpen || !IOSTouch_CheatCanAct() || !IOSTouch_LevelPickShows() || iLevel < 1 || iLevel > _hud.ctLevels) return;
+  if (!bOpen || !IOSTouch_LevelPickShows() || iLevel < 1 || iLevel > _hud.ctLevels) return;
   _iLevelPicked = iLevel;
   _iRequests |= IOSTOUCH_REQ_LEVEL;
 }
@@ -1216,7 +1216,7 @@ static void IOSTouch_CheatMoved(IOSTouchSlot *s, double x, double y)
 // tray re-placed as LEVEL comes and goes; a new level (no noclip in it)
 static void IOSTouch_TickCheat(double now, double known)
 {
-  if (_bLevelListOpen && (!IOSTouch_LevelPickShows() || !IOSTouch_CheatCanAct())) IOSTouch_CloseLevelList();
+  if (_bLevelListOpen && !IOSTouch_LevelPickShows()) IOSTouch_CloseLevelList();
   if (IOSTouch_LevelPickShows() != _bTrayLevelPlaced) IOSTouch_PlaceTray(IOSTouch_LevelPickShows());
   if (_hud.uWorld != _uWorldSeen) {
     _uWorldSeen = _hud.uWorld;
@@ -1364,8 +1364,8 @@ static void IOSTouch_WheelBuild(void)
 }
 
 // The game holds still while the weapon wheel is open
-// The game holds still while the weapon wheel or the cheat's list of levels
-// is open
+// The game holds still while the weapon wheel or the list of levels is
+// open
 int IOSTouch_HoldsGame(void)
 {
   return (_bWheelOpen || _bLevelListOpen) && _iMode == IOSTOUCH_GAMEPLAY;
@@ -4316,10 +4316,6 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
 
 // ------------------------------------------------------------ the cheat
 
-// CHEAT: BJ's face from the game's own status bar (IOSGame.cpp hands it
-// over), in colour while the cheat is on, grey while it's off; its hold's
-// ring. USE: the cheat's noclip ring, and a small red label under it. The
-// tray's LEVEL in the cheat's gold.
 // A button showing one of iOS's symbols (the words where there is none)
 static void IOSTouch_SetSymbol(UILabel *l, NSString *name, CGFloat size, NSString *fallback)
 {
@@ -4349,6 +4345,10 @@ static void IOSTouch_SetSymbol(UILabel *l, NSString *name, CGFloat size, NSStrin
   bShowCameraSaved = _bShowCamera;
 }
 
+// CHEAT: BJ's face from the game's own status bar (IOSGame.cpp hands it
+// over), in colour while the cheat is on, grey while it's off; its hold's
+// ring. USE: the cheat's noclip ring, and a small red label under it. The
+// tray's LEVEL in the cheat's gold while it's on.
 - (void)makeCheat
 {
   UILabel *b = aButtonViews[BTN_CHEAT];

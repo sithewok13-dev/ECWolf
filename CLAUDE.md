@@ -79,11 +79,14 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   weapon in hand kept) and every key, given as it comes on and in each level
   started or loaded; ammo kept full. USE held still 0.5 s (gold ring) =
   noclip on/off, with a small red "HOLD: NOCLIP" / "NOCLIP ON" under USE;
-  noclip ends at each new level. The tray's LEVEL (cheat on, in a level)
-  opens a list of the game's maps (MAP01..., `IOSGame_LevelInfo`: "Episode
-  name, Floor n" in Wolf3D, the MAPINFO names in Spear; the episode/floor
-  and map under), the game holding still; a tap warps there (ECWolf's
-  `DEBUG_Warp`). Off each launch; the button's showing is remembered
+  noclip ends at each new level. The tray's LEVEL (any single-player
+  level, cheat or not; gold while the cheat is on) opens a list of the
+  game's maps (MAP01..., `IOSGame_LevelInfo`: "Episode name, Floor n" in
+  Wolf3D, the MAPINFO names in Spear, "(secret)" on secret floors; the
+  episode/floor and map under), the game holding still; a tap warps there
+  (ECWolf's `DEBUG_Warp`: the floor from its start as a new game, pistol,
+  8 bullets, score 0, a new game's lives -- "Going to ...: a fresh start";
+  with the cheat on, everything is given again). Off each launch; the button's showing is remembered
   (`iosTouchShowCheat`).
 - **iOS code:** `ios/`: `i_ios.mm` (main, paths, the first screen, the
   picker's fallback and the error alert, the log, the 60 FPS cap; SDL's accelerometer joystick is off: ECWolf read
@@ -166,7 +169,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     cancels; SAVE wins a tie (LOAD's tap does nothing while SAVE is held);
     only a finished hold saves or loads.
   - MENU: tap = game menu; hold 0.45 s = tray with LOOK, ALWAYS RUN,
-    OPACITY, FPS, CAMERA, CHEAT, LEVEL (cheat on, in a level), keyboard, and the
+    OPACITY, FPS, CAMERA, CHEAT, LEVEL (in a level, single player), keyboard, and the
     build stamp under it in small dim text (not a button).
   - LOOK (tray): the drag's turning speed, shown on it ("LOOK 1x"); a tap
     steps 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3x (round to 0.5x); held 0.45 s

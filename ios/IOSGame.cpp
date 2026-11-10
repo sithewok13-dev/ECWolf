@@ -769,9 +769,15 @@ static void WarpTo(int i)
 	char name[128], detail[128];
 	IOSGame_LevelInfo(i, name, sizeof(name), detail, sizeof(detail));
 	FString msg;
-	msg.Format("Going to %s", name);
+	// (ECWolf's warp: the floor from its start, as a new game -- the pistol,
+	// 8 bullets, full health, score 0, the lives a new game has; with the
+	// cheat on, KeepCheat gives everything again)
+	if(IOSTouch_CheatOn())
+		msg.Format("Going to %s", name);
+	else
+		msg.Format("Going to %s: a fresh start", name);
 	IOSTouch_ShowMessage(msg, 2.0);
-	printf("iOS: cheat warp to %s (%s)\n", levelNames[i - 1], name);
+	printf("iOS: level list: to %s (%s)\n", levelNames[i - 1], name);
 	DebugCmd cmd = {DEBUG_Warp};
 	cmd.ArgS = levelNames[i - 1];
 	Net::DebugKey(cmd);
