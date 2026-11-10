@@ -43,6 +43,9 @@
 #include "wl_agent.h"
 #include "wl_main.h"
 #include "wl_play.h"
+#ifdef ECWOLF_IOS
+extern "C" void IOS_ScreenPixels(int *w, int *h); // (ios/i_ios.mm)
+#endif
 
 static bool doWriteConfig = false;
 
@@ -195,7 +198,6 @@ void ReadConfig(void)
 #ifdef ECWOLF_IOS
 	// iOS: the whole screen, at its own resolution, in step with it
 	{
-		extern "C" void IOS_ScreenPixels(int *w, int *h);
 		int w = 0, h = 0;
 		IOS_ScreenPixels(&w, &h);
 		if(w >= 320 && h >= 200)

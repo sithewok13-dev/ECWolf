@@ -21,6 +21,9 @@
 #ifdef ECWOLF_TOUCH
 #include "IOSGame.h"
 #endif
+#ifdef ECWOLF_IOS
+extern "C" void IOS_FrameCap(void); // (ios/i_ios.mm)
+#endif
 
 IVideo *Video = NULL;
 
@@ -925,7 +928,6 @@ void SDLFB::Update ()
 #endif
 #ifdef ECWOLF_IOS
 		// (the tray's FPS at 60: frames kept 1/60 s apart, i_ios.mm)
-		extern "C" void IOS_FrameCap(void);
 		IOS_FrameCap();
 #endif
 		SDL_RenderPresent(Renderer);
