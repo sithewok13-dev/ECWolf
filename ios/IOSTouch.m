@@ -35,6 +35,7 @@ static double IOSTouchRig_Now(void);
 #include <stdlib.h>
 #include <string.h>
 #include "IOSTouch.h"
+#include "IOSCamera.h"
 
 // Look speed: degrees the view turns for a point of finger travel (the Jedi
 // Knight and Serious Sam ports' 0.64 across; 0.39 up and down, which
@@ -148,6 +149,20 @@ static const float _afLookSteps[] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f
 #define IOSTOUCH_MENU_REPEAT 0.15
 #define IOSTOUCH_MENU_KEYS 8
 
+// CAMERA (as the Serious Sam, Jedi Knight and Raze ports'): a tap takes a
+// photo, held still IOSTOUCH_SELFIE_HOLD a selfie (a ring fills), slid off
+// sideways (IOSTOUCH_WHEEL_OPEN_SLIDE) a burst, a slide mostly down,
+// IOSTOUCH_FREEZE_SWIPE long, Action Freeze, and one mostly up the cinematic
+// burst: up, a slide that reaches within IOSTOUCH_FREEZE_EDGE of the top of
+// the screen is enough, but never one shorter than IOSTOUCH_FREEZE_SWIPE_MIN.
+// The camera (IOSCamera.h) does the work; while it is busy CAMERA is dimmed
+// and takes no new press, and during a selfie, Action Freeze or the
+// cinematic burst the buttons hide.
+#define IOSTOUCH_SELFIE_HOLD 0.5
+#define IOSTOUCH_FREEZE_SWIPE 36.0
+#define IOSTOUCH_FREEZE_EDGE 6.0
+#define IOSTOUCH_FREEZE_SWIPE_MIN 16.0
+
 #define IOSTOUCH_MAX_TOUCHES 10
 
 // ---------------------------------------------------------------- buttons
@@ -168,6 +183,8 @@ enum {
   KIND_CHEAT,    // CHEAT: held IOSTOUCH_CHEAT_HOLD, the cheat on or off; a tap does nothing
   KIND_CHEATSWITCH, // (MENU's tray) shows CHEAT and switches the cheat on, or leaves cheat mode, when the touch lifts on it
   KIND_LEVELPICK,// (MENU's tray, the cheat on) opens the list of levels, when the touch lifts on it
+  KIND_CAMERA,   // CAMERA: a tap, a hold, a slide (see IOSTOUCH_SELFIE_HOLD)
+  KIND_CAMSWITCH,// (MENU's tray) shows or hides CAMERA, when the touch lifts on it; held IOSTOUCH_MENU_HOLD, CAMERA's options
 };
 
 // which modes a button shows in
@@ -191,20 +208,21 @@ typedef struct {
 // that lands on one while aiming keeps aiming. Top left: NEXT WPN (a tap;
 // slid or held, the weapon wheel) and MAP. Top right: SAVE and LOAD (a tap,
 // the game's menu; held, the quick one) and the menu. CHEAT (while cheat
-// mode is on) between the top row's middle -- kept free for a camera button
-// -- and SAVE. Holding MENU opens a tray just under it: LOOK (the look
-// speed), ALWAYS RUN, OPACITY, FPS (which shows or hides a frame rate
-// readout by SAVE), CHEAT, LEVEL (while the cheat is on, in a level) and
-// the keyboard. RESUME, in the middle, only while the game is paused. In
+// mode is on) between the top row's middle -- CAMERA's place -- and SAVE.
+// Holding MENU opens a tray just under it: LOOK (the look speed), ALWAYS
+// RUN, OPACITY, FPS (which shows or hides a frame rate readout by SAVE),
+// CAMERA (the camera symbol: shows or hides CAMERA; held, its options),
+// CHEAT, LEVEL (while the cheat is on, in a level) and the keyboard. RESUME, in the middle, only while the game is paused. In
 // the menus: BACK top left, the arrows on the right, MENU (and its tray).
 enum {
   BTN_FIRE, BTN_USE,
   BTN_NEXTWPN, BTN_MAP,
   BTN_CHEAT,
+  BTN_CAMERA,
   BTN_QUICKSAVE, BTN_QUICKLOAD, BTN_MENU,
   BTN_RESUME,
   BTN_BACK, BTN_MENUUP, BTN_MENUDOWN,
-  BTN_TRAYLOOK, BTN_TRAYRUN, BTN_TRAYOPACITY, BTN_TRAYFPS, BTN_TRAYCHEAT, BTN_TRAYLEVEL, BTN_TRAYKEYS, // MENU's tray (left to right), hidden unless it is open (LEVEL only while the cheat is on, in a level)
+  BTN_TRAYLOOK, BTN_TRAYRUN, BTN_TRAYOPACITY, BTN_TRAYFPS, BTN_TRAYCAM, BTN_TRAYCHEAT, BTN_TRAYLEVEL, BTN_TRAYKEYS, // MENU's tray (left to right), hidden unless it is open (LEVEL only while the cheat is on, in a level)
   BTN_COUNT
 };
 static IOSTouchButton _aButtons[] = {
@@ -213,6 +231,7 @@ static IOSTouchButton _aButtons[] = {
   [BTN_NEXTWPN]   = { "NEXT\nWPN",   KIND_WHEEL,    IOSTOUCH_NEXTWEAPON,    22.0, 0, SHOW_PLAY },
   [BTN_MAP]       = { "MAP",         KIND_TAP,      IOSTOUCH_REQ_MAP,       22.0, 0, SHOW_PLAY },
   [BTN_CHEAT]     = { "",            KIND_CHEAT,    0,                      22.0, 0, SHOW_PLAY },
+  [BTN_CAMERA]    = { "",            KIND_CAMERA,   0,                      22.0, 0, SHOW_PLAY },
   [BTN_QUICKSAVE] = { "SAVE",        KIND_HOLDSAVE, IOSTOUCH_REQ_QUICKSAVE, 22.0, 0, SHOW_PLAY },
   [BTN_QUICKLOAD] = { "LOAD",        KIND_HOLDLOAD, IOSTOUCH_REQ_QUICKLOAD, 22.0, 0, SHOW_PLAY },
   [BTN_MENU]      = { "MENU",        KIND_MENU,     IOSTOUCH_REQ_MENU,      22.0, 0, SHOW_ALL },
@@ -224,6 +243,7 @@ static IOSTouchButton _aButtons[] = {
   [BTN_TRAYRUN]   = { "ALWAYS\nRUN", KIND_ALWAYSRUN, IOSTOUCH_REQ_RUN,      20.0, 0, SHOW_ALL },
   [BTN_TRAYOPACITY] = { "OPACITY",   KIND_OPACITY,  0,                      20.0, 0, SHOW_ALL },
   [BTN_TRAYFPS]   = { "FPS",         KIND_FPS,      0,                      20.0, 0, SHOW_ALL },
+  [BTN_TRAYCAM]   = { "",            KIND_CAMSWITCH, 0,                     20.0, 0, SHOW_ALL },
   [BTN_TRAYCHEAT] = { "CHEAT",       KIND_CHEATSWITCH, 0,                   20.0, 0, SHOW_ALL },
   [BTN_TRAYLEVEL] = { "LEVEL",       KIND_LEVELPICK, 0,                     20.0, 0, SHOW_PLAY },
   [BTN_TRAYKEYS]  = { "",            KIND_KEYBOARD, IOSTOUCH_REQ_KEYBOARD,  20.0, 0, SHOW_ALL },
@@ -500,8 +520,10 @@ static void IOSTouch_LayoutButtons(double W, double H, double inLeft, double inT
   _aButtons[BTN_QUICKLOAD].x = right - 90;
   _aButtons[BTN_MENU].x = right - 24;
   _aButtons[BTN_QUICKSAVE].y = _aButtons[BTN_QUICKLOAD].y = _aButtons[BTN_MENU].y = top + 26;
-  // CHEAT half way between the top row's middle (kept free for a camera
-  // button) and SAVE
+  // CAMERA in the middle of the top row (left free for it); CHEAT half way
+  // between it and SAVE
+  _aButtons[BTN_CAMERA].x = round((left + right) * 0.5);
+  _aButtons[BTN_CAMERA].y = top + 26;
   _aButtons[BTN_CHEAT].x = round(((left + right) * 0.5 + _aButtons[BTN_QUICKSAVE].x) * 0.5);
   _aButtons[BTN_CHEAT].y = top + 26;
 
@@ -725,6 +747,10 @@ static int _ctCheatTicks = 0;
 static int _bLevelListOpen = 0, _iLevelPicked = 0;
 static unsigned int _uWorldSeen = 0;
 static int _ctMaxFpsChanges = 0;
+// CAMERA: whether it shows (the view keeps it in the app's settings), its
+// selfie hold's ring and the tray CAMERA's (held for the options)
+static int _bShowCamera = 1;
+static float _fCameraRing = 0.0f, _fCamSwitchRing = 0.0f;
 // The keys waiting for the menus (IOSTouch_TakeMenuKey), oldest first
 static int _aiMenuKeys[IOSTOUCH_MENU_KEYS];
 static int _ctMenuKeys = 0;
@@ -752,6 +778,8 @@ static int IOSTouch_LevelPickShows(void)
 static int IOSTouch_IsShown(int button)
 {
   if (!(_aButtons[button].iShowIn & (1 << _iMode))) return 0;
+  if (_iMode == IOSTOUCH_GAMEPLAY && IOSCamera_Stage()) return 0; // (a selfie, Action Freeze, the cinematic burst)
+  if (button == BTN_CAMERA) return _bShowCamera;
   if (button == BTN_QUICKSAVE || button == BTN_QUICKLOAD) return !_hud.bNoSaves;
   if (button == BTN_CHEAT) return _bShowCheat;
   if (button == BTN_TRAYLEVEL) return _bTrayOpen && IOSTouch_LevelPickShows();
@@ -1008,6 +1036,9 @@ static void IOSTouch_UseTrayButton(int button)
   }
   else if (kind == KIND_FPS) {
     IOSTouch_SetShowFps(!_bShowFps);
+  }
+  else if (kind == KIND_CAMSWITCH) {
+    _bShowCamera = !_bShowCamera;
   }
   else if (kind == KIND_CHEATSWITCH) {
     IOSTouch_UseCheatSwitch();
@@ -2328,10 +2359,13 @@ static void IOSTouch_TouchBegan(const void *touch, double x, double y, double W,
       s->yDown = y;
     }
   }
+  else if (s->button == BTN_CAMERA && IOSCamera_IsBusy()) {
+    s->role = ROLE_IGNORED; // (the camera is busy: CAMERA is dimmed and takes no new press)
+  }
   else if (s->button >= 0) {
     s->role = ROLE_BUTTON;
     _aButtonHeld[s->button]++;
-    s->xDown = x; // (MAP's slide, and CHEAT's and USE's stillness, are measured from here)
+    s->xDown = x; // (MAP's and CAMERA's slides, and CHEAT's and USE's stillness, are measured from here)
     s->yDown = y;
     if (_aButtons[s->button].kind == KIND_KEY) {
       // BACK and the arrows: their key now, again while held
@@ -2397,6 +2431,28 @@ static int IOSTouch_TouchMoved(const void *touch, double x, double y)
     tb = IOSTouch_IsTrayButton(tb) ? tb : -1;
     if (tb != s->trayButton) {
       s->trayButton = tb;
+      bLooksChanged = 1;
+    }
+  }
+  else if (s->role == ROLE_BUTTON && s->button == BTN_CAMERA && !s->bFired && _iMode == IOSTOUCH_GAMEPLAY) {
+    // CAMERA slid: mostly down far enough, Action Freeze; mostly up far
+    // enough, the cinematic burst; any other way, a burst
+    const double dx = x - s->xDown, dy = y - s->yDown;
+    const int bVertical = fabs(dy) >= fabs(dx) && dy != 0.0;
+    const double upFar = fmin(IOSTOUCH_FREEZE_SWIPE, fmax(s->yDown - IOSTOUCH_FREEZE_EDGE, IOSTOUCH_FREEZE_SWIPE_MIN));
+    if (bVertical && fabs(dy) >= (dy > 0 ? IOSTOUCH_FREEZE_SWIPE : upFar)) {
+      s->bFired = 1;
+      _fCameraRing = 0.0f;
+      if (_aButtonHeld[BTN_CAMERA] > 0) _aButtonHeld[BTN_CAMERA]--;
+      s->role = ROLE_IGNORED;
+      if (dy > 0) IOSCamera_Freeze();
+      else IOSCamera_Cinematic();
+      bLooksChanged = 1;
+    }
+    else if (!bVertical && hypot(dx, dy) >= IOSTOUCH_WHEEL_OPEN_SLIDE) {
+      s->bFired = 1;
+      _fCameraRing = 0.0f;
+      IOSCamera_Burst();
       bLooksChanged = 1;
     }
   }
@@ -2570,13 +2626,21 @@ static void IOSTouch_TouchEnded(const void *touch, double x, double y, int bCanc
         else if (!bSaveHeld) _iRequests |= IOSTOUCH_REQ_LOADMENU;
       }
       else if (IOSTouch_IsTrayButton(s->button)
-               && !((s->button == BTN_TRAYFPS || s->button == BTN_TRAYOPACITY || s->button == BTN_TRAYLOOK) && s->bFired)) {
-        IOSTouch_UseTrayButton(s->button); // (not the tray's FPS slid off, or OPACITY or LOOK once held: that set the default)
+               && !((s->button == BTN_TRAYFPS || s->button == BTN_TRAYOPACITY || s->button == BTN_TRAYLOOK || s->button == BTN_TRAYCAM) && s->bFired)) {
+        IOSTouch_UseTrayButton(s->button); // (not the tray's FPS slid off, or OPACITY, LOOK or CAMERA once held: that set the default, or opened the options)
       }
       else if (b->kind == KIND_MENU && !s->bFired) {
         _iRequests |= b->ulAction; // a tap: the menu
       }
+      else if (b->kind == KIND_CAMERA && !s->bFired && !IOSCamera_IsBusy()) {
+        // a tap: a photo; held long enough but lifted before a frame could
+        // see it (a slow one): the selfie
+        if (tTouch - s->tDownTouch < IOSTOUCH_SELFIE_HOLD) IOSCamera_Photo();
+        else if (_iMode == IOSTOUCH_GAMEPLAY) IOSCamera_Selfie();
+      }
     }
+    if (s->button == BTN_CAMERA) _fCameraRing = 0.0f;
+    if (s->button == BTN_TRAYCAM) _fCamSwitchRing = 0.0f;
     if (s->button == BTN_TRAYFPS) _fFpsRing = 0.0f;
     if (s->button == BTN_TRAYOPACITY) _fOpacityRing = 0.0f;
     if (s->button == BTN_TRAYLOOK) _fLookRing = 0.0f;
@@ -2660,6 +2724,7 @@ static void IOSTouch_TickHolds(double now)
   _fFpsRing = 0.0f; // (set again below while the tray's FPS is held)
   _fOpacityRing = 0.0f; // (...and OPACITY)
   _fLookRing = 0.0f; // (...and LOOK)
+  _fCameraRing = _fCamSwitchRing = 0.0f; // (...and CAMERA, and the tray's)
   float fSaveRing = 0.0f, fLoadRing = 0.0f;
   int iDone = -1; // the quick hold that completed: BTN_QUICKSAVE or BTN_QUICKLOAD
   for (int i = 0; i < IOSTOUCH_MAX_TOUCHES; i++) {
@@ -2687,6 +2752,38 @@ static void IOSTouch_TickHolds(double now)
         const float fRing = (float)fmin((now - s->tDown) / hold, 1.0);
         if (s->button == BTN_QUICKSAVE) fSaveRing = fmaxf(fSaveRing, fRing);
         else fLoadRing = fmaxf(fLoadRing, fRing);
+      }
+    }
+    else if (s->button == BTN_CAMERA && _iMode == IOSTOUCH_GAMEPLAY) {
+      // held still (a slide already fired: a burst, Action Freeze, the
+      // cinematic burst): known to be held IOSTOUCH_SELFIE_HOLD, a selfie;
+      // until then the ring fills
+      if (known - s->tDown >= IOSTOUCH_SELFIE_HOLD) {
+        s->bFired = 1;
+        _fCameraRing = 0.0f;
+        if (_aButtonHeld[BTN_CAMERA] > 0) _aButtonHeld[BTN_CAMERA]--;
+        s->role = ROLE_IGNORED;
+        IOSCamera_Selfie();
+        continue;
+      }
+      _fCameraRing = (float)fmin(fmax(0.0, (now - s->tDown) / IOSTOUCH_SELFIE_HOLD), 1.0);
+    }
+    else if (s->button == BTN_TRAYCAM) {
+      // the tray's CAMERA held: its options open (the lift then does nothing)
+      if (!IOSTouch_LiftsOnButton(s->x, s->y, BTN_TRAYCAM)) {
+        s->bFired = 1;
+        _fCamSwitchRing = 0.0f;
+        continue;
+      }
+      const double progress = (now - s->tDown) / IOSTOUCH_MENU_HOLD;
+      if (progress >= 1.0) {
+        s->bFired = 1;
+        _fCamSwitchRing = 0.0f;
+        IOSTouch_SetTrayOpen(0);
+        IOSCamera_ShowOptions();
+      }
+      else {
+        _fCamSwitchRing = (float)progress;
       }
     }
     else if (s->button == BTN_TRAYOPACITY) {
@@ -2841,6 +2938,7 @@ static void IOSTouch_ResetTouches(int bReading)
   _afWheelRing[0] = _afWheelRing[1] = 0.0f;
   _fFpsRing = 0.0f;
   _fOpacityRing = 0.0f;
+  _fCameraRing = _fCamSwitchRing = 0.0f;
   IOSTouch_ResetShared(bReading);
 }
 
@@ -2926,6 +3024,8 @@ void IOSTouch_TakeLook(float *pfDX, float *pfDY)
 #define IOSTOUCH_FPS_DEFAULTS_KEY @"iosTouchShowFps"
 #define IOSTOUCH_LOOKSCALE_DEFAULTS_KEY @"iosTouchLookScale"
 #define IOSTOUCH_CHEAT_DEFAULTS_KEY @"iosTouchShowCheat"
+// ...and whether CAMERA shows (never set: it does)
+#define IOSTOUCH_CAMERA_DEFAULTS_KEY @"iosTouchShowCamera"
 // ...and OPACITY's strength (never set: 100%), and its slider's size
 #define IOSTOUCH_OPACITY_DEFAULTS_KEY @"iosTouchOpacity"
 #define IOSTOUCH_OPACITY_W 260.0
@@ -3037,6 +3137,10 @@ typedef struct {
   CALayer *cheatFace;
   id cheatImages[2];
   CAShapeLayer *cheatRing;
+  // CAMERA: its selfie hold's ring, the tray CAMERA's (held for the
+  // options), its showing as the app's settings have it
+  CAShapeLayer *cameraRing, *camSwitchRing;
+  int bShowCameraSaved;
   CAShapeLayer *noclipRing;
   UILabel *noclipLabel;
   int iCheatLook;
@@ -3103,6 +3207,7 @@ typedef struct {
 - (void)syncLevels;
 - (void)makeLevelPanel;
 - (void)makeCheat;
+- (void)makeCamera;
 - (void)setRunLit:(int)bLit;
 - (void)refreshCheat;
 - (void)placeLevelPanel;
@@ -3350,6 +3455,7 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     [self addSubview:stickKnob];
 
     [self makeCheat];
+    [self makeCamera];
     [self makeWheel];
     [self makeMessage];
     [self makeLevelPanel];
@@ -3602,11 +3708,13 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     const int bOn = (i == BTN_TRAYKEYS && _hud.bKeyboard)
                     || (i == BTN_TRAYFPS && _bShowFps)
                     || (i == BTN_TRAYRUN && _hud.bRunOn)
-                    || (i == BTN_MAP && _hud.bAutomap);
+                    || (i == BTN_MAP && _hud.bAutomap)
+                    || (i == BTN_TRAYCAM && _bShowCamera);
     const int bGold = ((i == BTN_CHEAT || i == BTN_TRAYCHEAT || i == BTN_TRAYLEVEL) && _bCheatOn)
                       || (i == BTN_USE && IOSTouch_CheatNoclip());
     const int bTray = IOSTouch_IsTrayButton(i); // only there while the tray is open
     CGFloat alpha = (bHeld || bOn || bGold || bTray) ? 1.0 : IOSTOUCH_IDLE_ALPHA;
+    if (i == BTN_CAMERA && IOSCamera_IsBusy()) alpha *= 0.45; // (the camera is busy)
     if (!bTray) alpha *= _fOpacity; // (OPACITY: the controls; the tray at full)
     l.alpha = alpha;
     if (bGold) {
@@ -3672,6 +3780,8 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
   [self setRing:lookRing progress:_fLookRing];
   [self setRing:cheatRing progress:_fCheatRing];
   [self setRing:noclipRing progress:_fNoclipRing];
+  [self setRing:cameraRing progress:_fCameraRing];
+  [self setRing:camSwitchRing progress:_fCamSwitchRing];
   [self setRing:aWheelRings[0] progress:_afWheelRing[0]];
   [self syncWheel];
   [self syncLevels];
@@ -4145,7 +4255,8 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
   const int iFpsWas = _iFpsShown;
   const int iShownWas = (_hud.bNoSaves != 0) * 16 + (_hud.bRunOn != 0) * 32 + (_hud.bAutomap != 0) * 64 + (_hud.bKeyboard != 0) * 128
                         + _bShowCheat * 256 + _bCheatOn * 512 + _bNoclip * 1024 + IOSTouch_CheatCanAct() * 2048
-                        + _bTrayLevelPlaced * 4096 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384;
+                        + _bTrayLevelPlaced * 4096 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384
+                        + (_bShowCamera + 2 * (IOSCamera_Stage() != 0) + 4 * (IOSCamera_IsBusy() != 0)) * 4194304;
   IOSTouch_TickHolds(now);
   tLastTick = now;
   [self refreshMessage];
@@ -4158,8 +4269,14 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
   [self setRing:lookRing progress:_fLookRing];
   [self setRing:cheatRing progress:_fCheatRing];
   [self setRing:noclipRing progress:_fNoclipRing];
+  [self setRing:cameraRing progress:_fCameraRing];
+  [self setRing:camSwitchRing progress:_fCamSwitchRing];
   [self setRing:aWheelRings[0] progress:_afWheelRing[0]];
   [self syncWheel]; // (a hold may have opened the weapon wheel, or the game closed it)
+  if (bShowCameraSaved != _bShowCamera) {
+    bShowCameraSaved = _bShowCamera;
+    [[NSUserDefaults standardUserDefaults] setBool:(_bShowCamera ? YES : NO) forKey:IOSTOUCH_CAMERA_DEFAULTS_KEY];
+  }
   [self syncLevels]; // (the cheat's list closes as LEVEL goes)
   // LOOK held: back to 1x (a thump)
   if (ctLookResetsFelt != _ctLookResets) {
@@ -4188,7 +4305,8 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
   // readout counts
   const int iShownNow = (_hud.bNoSaves != 0) * 16 + (_hud.bRunOn != 0) * 32 + (_hud.bAutomap != 0) * 64 + (_hud.bKeyboard != 0) * 128
                         + _bShowCheat * 256 + _bCheatOn * 512 + _bNoclip * 1024 + IOSTouch_CheatCanAct() * 2048
-                        + _bTrayLevelPlaced * 4096 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384;
+                        + _bTrayLevelPlaced * 4096 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384
+                        + (_bShowCamera + 2 * (IOSCamera_Stage() != 0) + 4 * (IOSCamera_IsBusy() != 0)) * 4194304;
   if (_bTrayOpen != bTrayWasOpen || _iFpsShown != iFpsWas || iShownNow != iShownWas
       || opacityBack.hidden == (_bOpacityOpen && _bTrayOpen)) {
     [self refreshButtonLooks];
@@ -4202,6 +4320,35 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
 // over), in colour while the cheat is on, grey while it's off; its hold's
 // ring. USE: the cheat's noclip ring, and a small red label under it. The
 // tray's LEVEL in the cheat's gold.
+// A button showing one of iOS's symbols (the words where there is none)
+static void IOSTouch_SetSymbol(UILabel *l, NSString *name, CGFloat size, NSString *fallback)
+{
+  UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:size weight:UIImageSymbolWeightSemibold];
+  UIImage *img = [UIImage systemImageNamed:name withConfiguration:cfg];
+  if (!img) {
+    l.text = fallback;
+    return;
+  }
+  NSTextAttachment *att = [[NSTextAttachment alloc] init];
+  att.image = [img imageWithTintColor:[UIColor colorWithWhite:1.0 alpha:0.85] renderingMode:UIImageRenderingModeAlwaysOriginal];
+  l.attributedText = [NSAttributedString attributedStringWithAttachment:att];
+}
+
+// CAMERA and the tray's CAMERA: the camera symbol, their rings, and whether
+// CAMERA shows (remembered)
+- (void)makeCamera
+{
+  IOSTouch_SetSymbol(aButtonViews[BTN_CAMERA], @"camera.fill", 15, @"PHOTO");
+  IOSTouch_SetSymbol(aButtonViews[BTN_TRAYCAM], @"camera", 14, @"CAM");
+  cameraRing = IOSTouch_MakeHoldRing(_aButtons[BTN_CAMERA].radius);
+  [aButtonViews[BTN_CAMERA].layer addSublayer:cameraRing];
+  camSwitchRing = IOSTouch_MakeHoldRing(_aButtons[BTN_TRAYCAM].radius);
+  [aButtonViews[BTN_TRAYCAM].layer addSublayer:camSwitchRing];
+  NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+  if ([d objectForKey:IOSTOUCH_CAMERA_DEFAULTS_KEY]) _bShowCamera = [d boolForKey:IOSTOUCH_CAMERA_DEFAULTS_KEY] ? 1 : 0;
+  bShowCameraSaved = _bShowCamera;
+}
+
 - (void)makeCheat
 {
   UILabel *b = aButtonViews[BTN_CHEAT];

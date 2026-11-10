@@ -50,6 +50,7 @@
 #include "thingdef/thingdef.h"
 
 #include "IOSGame.h"
+#include "IOSCamera.h"
 
 namespace GameSave
 {
@@ -138,6 +139,8 @@ bool IOSGame_GameResolution(int *w, int *h)
 	return true;
 }
 
+static int lastPicture[6] = { 0, 0, 0, 0, 0, 0 };
+
 bool IOSGame_PictureRect(SDL_Window *pWindow, int outW, int outH, int texW, int texH, SDL_Rect *dst)
 {
 	if(outW <= 0 || outH <= 0 || texW <= 0 || texH <= 0)
@@ -172,7 +175,23 @@ bool IOSGame_PictureRect(SDL_Window *pWindow, int outW, int outH, int texW, int 
 	dst->y = y;
 	dst->w = w;
 	dst->h = h;
+	lastPicture[0] = dst->x;
+	lastPicture[1] = dst->y;
+	lastPicture[2] = w;
+	lastPicture[3] = h;
+	lastPicture[4] = outW;
+	lastPicture[5] = outH;
 	return true;
+}
+
+// (CAMERA's photo with the buttons: where the game's picture was last put,
+// in SDL's output pixels: x, y, w, h, and the output's width and height)
+extern "C" int IOSGame_LastPictureRect(int r[6])
+{
+	if(lastPicture[4] <= 0)
+		return 0;
+	memcpy(r, lastPicture, sizeof(lastPicture));
+	return 1;
 }
 
 // For the log: every 5 s of play, the frames a second the game really drew
@@ -593,6 +612,7 @@ static void NoteWorld(const player_t *p)
 	if(p->mo != worldMo || strncmp(worldMap, gamestate.mapname, 8) != 0 || (int32_t)gamestate.TimeCount < worldTime)
 	{
 		worldMo = p->mo;
+		IOSCamera_Abort(); // (CAMERA: whatever it was doing ends with the level)
 		strncpy(worldMap, gamestate.mapname, 8);
 		worldMap[8] = 0;
 		worldCount++;
@@ -871,6 +891,9 @@ void IOSGame_Frame()
 		FeedCheatIcon();
 
 	const int req = IOSTouch_Update(gameWindow, mode, &hud, framesDrawn);
+	// CAMERA: its bursts, selfies, Action Freeze and cinematic bursts, in a
+	// level being played alone
+	IOSCamera_Frame(mode == IOSTOUCH_GAMEPLAY && Net::InitVars.mode == Net::MODE_SinglePlayer);
 
 	if(req & IOSTOUCH_REQ_MENU)
 		escapeWanted = true;
@@ -909,6 +932,7 @@ void IOSGame_CheckKeys()
 		return;
 	const bool save = wantQuickSave;
 	wantQuickSave = wantQuickLoad = false;
+	IOSCamera_Abort(); // (a save or load: CAMERA's poses and views end first)
 	if(Net::InitVars.mode != Net::MODE_SinglePlayer || playstate != ex_stillplaying)
 		return;
 	if(save)
@@ -953,6 +977,15 @@ void IOSGame_Ticcmd(bool bFirstTic)
 	TicCmd_t &cmd = control[ConsolePlayer];
 	IOSTouchInput in;
 	IOSTouch_ReadInput(&in);
+	if(IOSCamera_HoldsGame())
+	{
+		// (CAMERA holds the game still: the touches do nothing meanwhile)
+		float dx, dy;
+		IOSTouch_TakeLook(&dx, &dy);
+		turnLeft = 0.0;
+		lastButtons = 0;
+		return;
+	}
 	lastMoveX = in.fMoveX;
 	lastMoveY = in.fMoveY;
 	lastRun = in.bRun != 0;
@@ -990,7 +1023,7 @@ void IOSGame_Ticcmd(bool bFirstTic)
 		// takes (1/ANGLESCALE = 1/20 of a degree a count; + turns right)
 		float dx, dy;
 		IOSTouch_TakeLook(&dx, &dy);
-		if(lastMode == IOSTOUCH_GAMEPLAY && !Paused && !IOSTouch_HoldsGame())
+		if(lastMode == IOSTOUCH_GAMEPLAY && !Paused && !IOSGame_HoldsGame())
 		{
 			turnLeft += dx * 20.0;
 			const int turn = (int)turnLeft;
@@ -1004,7 +1037,12 @@ void IOSGame_Ticcmd(bool bFirstTic)
 
 bool IOSGame_HoldsGame()
 {
-	return IOSTouch_HoldsGame() != 0;
+	return IOSTouch_HoldsGame() != 0 || IOSCamera_HoldsGame();
+}
+
+void IOSGame_FrameDone()
+{
+	IOSCamera_FrameDone();
 }
 
 void IOSGame_TextInput(bool bOn)
@@ -1125,6 +1163,8 @@ static void RigFrame()
 			if(system(cmdline) != 0)
 				printf("rig: shot failed\n");
 		}
+		else if(!strncmp(line, "cam ", 4))
+			IOSCamera_RigCommand(line + 4); // (CAMERA: photo, selfie, freeze, orbit... see IOSCamera.cpp)
 		else if(!strcmp(line, "quit"))
 		{
 			fflush(stdout);

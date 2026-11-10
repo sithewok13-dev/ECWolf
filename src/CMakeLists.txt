@@ -267,16 +267,20 @@ if(ECWOLF_IOS)
 	# the alerts; IOSPicker.mm: the game picker), the touch controls
 	# (IOSTouch.m, Objective-C with ARC; IOSGame.cpp, the game side) and the
 	# search for the player's files (IOSGameData.cpp)
-	set(IOS_SOURCES ../ios/i_ios.mm ../ios/IOSPicker.mm ../ios/IOSTouch.m ../ios/IOSGame.cpp ../ios/IOSGameData.cpp)
+	# CAMERA: IOSCamera.cpp (the game side), IOSCapture.cpp (the frames),
+	# IOSPhotos.mm (saving to Photos or Files, the options, Action Freeze's
+	# controls)
+	set(IOS_SOURCES ../ios/i_ios.mm ../ios/IOSPicker.mm ../ios/IOSTouch.m ../ios/IOSGame.cpp ../ios/IOSGameData.cpp
+		../ios/IOSCamera.cpp ../ios/IOSCapture.cpp ../ios/IOSPhotos.mm)
 	target_sources(engine PRIVATE ${IOS_SOURCES})
-	set_source_files_properties(../ios/i_ios.mm ../ios/IOSPicker.mm PROPERTIES COMPILE_FLAGS "-std=gnu++17 -fobjc-arc")
+	set_source_files_properties(../ios/i_ios.mm ../ios/IOSPicker.mm ../ios/IOSPhotos.mm PROPERTIES COMPILE_FLAGS "-std=gnu++17 -fobjc-arc")
 	set_source_files_properties(../ios/IOSTouch.m PROPERTIES COMPILE_FLAGS "-x objective-c -fobjc-arc")
-	set_source_files_properties(../ios/IOSGame.cpp ../ios/IOSGameData.cpp PROPERTIES COMPILE_FLAGS "-std=gnu++11")
+	set_source_files_properties(../ios/IOSGame.cpp ../ios/IOSGameData.cpp ../ios/IOSCamera.cpp ../ios/IOSCapture.cpp PROPERTIES COMPILE_FLAGS "-std=gnu++11")
 	target_compile_definitions(engine PRIVATE ECWOLF_IOS=1 ECWOLF_TOUCH=1 ECWOLF_IOSPATHS=1)
 	target_include_directories(engine PRIVATE ${CMAKE_SOURCE_DIR}/ios)
 	# What SDL2, SDL2_mixer and the overlay need on iOS
 	foreach(fw UIKit Foundation OpenGLES QuartzCore CoreGraphics CoreFoundation AVFoundation AudioToolbox
-		CoreAudio CoreMotion GameController Metal CoreHaptics CoreBluetooth)
+		CoreAudio CoreMotion GameController Metal CoreHaptics CoreBluetooth Photos ImageIO)
 		target_link_libraries(engine PRIVATE "-framework ${fw}")
 	endforeach()
 	set_target_properties(engine PROPERTIES
@@ -328,9 +332,11 @@ endif()
 if(ECWOLF_TOUCH_RIG_SOURCE AND NOT ECWOLF_IOS)
 	# The Linux rig (ios/rig): the touch controls' C core through the rig's
 	# file, the game side and the iOS data search, on the desktop build
-	target_sources(engine PRIVATE ../ios/IOSGame.cpp ../ios/IOSGameData.cpp ${ECWOLF_TOUCH_RIG_SOURCE})
+	target_sources(engine PRIVATE ../ios/IOSGame.cpp ../ios/IOSGameData.cpp ../ios/IOSCamera.cpp ../ios/IOSCapture.cpp
+		../ios/rig/IOSPhotosRig.cpp ${ECWOLF_TOUCH_RIG_SOURCE})
 	set_source_files_properties(${ECWOLF_TOUCH_RIG_SOURCE} PROPERTIES COMPILE_FLAGS "-DIOSTOUCH_RIG")
-	set_source_files_properties(../ios/IOSGame.cpp ../ios/IOSGameData.cpp PROPERTIES COMPILE_FLAGS "-std=gnu++11")
+	set_source_files_properties(../ios/IOSGame.cpp ../ios/IOSGameData.cpp ../ios/IOSCamera.cpp ../ios/IOSCapture.cpp
+		../ios/rig/IOSPhotosRig.cpp PROPERTIES COMPILE_FLAGS "-std=gnu++11")
 	target_compile_definitions(engine PRIVATE ECWOLF_TOUCH=1 ECWOLF_IOSRIG=1 ECWOLF_IOSPATHS=1)
 	target_include_directories(engine PRIVATE ${CMAKE_SOURCE_DIR}/ios)
 endif()

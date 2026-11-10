@@ -28,9 +28,43 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
 - **Stage 2a (build 3):** no gyro (the owner's call: no tilt aiming, no
   GYRO or SENS); LOOK in the tray; the run marker on the stick and ALWAYS
   RUN in the tray (no RUN button); MAP top left; SAVE / LOAD (tap = the
-  game's menu, hold = quick); the sithewok cheat. **Later stages:** CAMERA
-  (its button goes in the middle of the top row, left free for it),
-  AUTOPLAY (as in the owner's other ports).
+  game's menu, hold = quick); the sithewok cheat. **Stage 2b:** CAMERA
+  (below). **Later:** AUTOPLAY (as in the owner's other ports).
+- **CAMERA** (top row, middle; single player): tap = photo (the tray's
+  CAMERA held opens its options: PHOTO kinds clean / HUD / HUD + buttons,
+  SELFIES 1/3/5, FREEZE on/off), hold 0.5 s (ring) = selfie, slide sideways
+  = burst (10 clean, 0.2 s apart), slide down = Action Freeze, slide up =
+  the cinematic burst (5). The tray's CAMERA (camera symbol) shows/hides it
+  (`iosTouchShowCamera`). Photos are the game's own 8-bit pixels made RGBA
+  with the base palette and scaled up a whole number of times, nearest (2x
+  on a phone): clean = the view window before the weapon, HUD = the whole
+  screen. Saved to Photos (add-only, `NSPhotoLibraryAddUsageDescription`)
+  else Files > Wolf3D > Screenshots; a flash, shutter sound and tap each
+  (`ios/IOSPhotos.mm`, from the Raze port's iosPhotos.mm; messages on the
+  overlay's line). `ios/IOSCapture.cpp` takes the frames;
+  `ios/IOSCamera.cpp` is the game side: a photo view drawn from its own
+  camera (hooks in `wl_draw.cpp`: `CalcViewVariables`, `WallRefresh`'s
+  viewz/viewshift, `CalcRotate`, no weapon, `IOSCamera_RenderBegin/End`
+  around the render), the game held still (`IOSGame_HoldsGame`), and
+  everything it changes (people moved/posed/hidden, BJ's figure on the
+  player's body, the lens's FOV, map `visible`/`amFlags`, actors'
+  projection fields) applied only while the view is drawn and put back
+  right after. Selfie = a group photo from the player's eyes, no player in
+  it: the nearest 12 enemies brought in front (the way with room),
+  standing frame (`SpawnState`) or a step (`SeeState`), facing the lens,
+  an arrangement per photo (huddle, peek, class rows, corner, tiny,
+  totem, pyramid, lift: lifts via actor `z`, 0.58 a shoulder); other
+  enemies, shots and whatever stands in front of a face hidden; "No one
+  around for a group photo" / "No room for a group photo here". Freeze:
+  orbits the enemy in the middle of the view or a point ahead (against a
+  wall: BJ, from behind), keeps out of walls/closed doors, height 0.06-0.94,
+  tilt as a y-shear (at most a third of the view), pinch: lens zoom to 8x
+  (FOV), below 1x backs off. BJ is the victory run's `BLAZ` sprites
+  (`BJRun`: running in freeze, the jump's arms-up frame in cinema); Spear
+  has none, so he isn't drawn there. Rig: `cam photo|selfie|burst|freeze|
+  cinema|end|orbit y p|pan r d|zoom f|kinds n|selfies n|hash|status`,
+  `@CAMERA`, `@TRAYCAM`; photos in `$IOSCAM_DIR`; `cam hash` (actors,
+  map, clock, every RNG) is printed before and after each held stage.
 - **The cheat (`sithewok`):** the tray's CHEAT shows the CHEAT button (top
   row, half way between the middle and SAVE) and switches the cheat on, or
   tapped again leaves cheat mode (off, button gone). CHEAT held 0.5 s
@@ -132,7 +166,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     cancels; SAVE wins a tie (LOAD's tap does nothing while SAVE is held);
     only a finished hold saves or loads.
   - MENU: tap = game menu; hold 0.45 s = tray with LOOK, ALWAYS RUN,
-    OPACITY, FPS, CHEAT, LEVEL (cheat on, in a level), keyboard, and the
+    OPACITY, FPS, CAMERA, CHEAT, LEVEL (cheat on, in a level), keyboard, and the
     build stamp under it in small dim text (not a button).
   - LOOK (tray): the drag's turning speed, shown on it ("LOOK 1x"); a tap
     steps 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3x (round to 0.5x); held 0.45 s
@@ -155,8 +189,8 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     0.3 s hold opens it to tap. The gap at the bottom cancels. The game
     holds still while a wheel is open. A haptic tick per slice.
   - Wolf3D's buttons: FIRE and USE bottom right; NEXT WPN and MAP (automap)
-    top left; CHEAT (cheat mode), SAVE, LOAD, MENU top right (the top row's
-    middle is kept for CAMERA); the stick strafes sideways.
+    top left; CAMERA in the top row's middle; CHEAT (cheat mode), SAVE,
+    LOAD, MENU top right; the stick strafes sideways.
   - HUD and buttons stay clear of the corners, the notch or Dynamic Island,
     and the home bar.
 - **Testing:** say plainly what was and wasn't tested. The owner tests on

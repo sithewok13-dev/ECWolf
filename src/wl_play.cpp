@@ -1107,7 +1107,7 @@ void PlayLoop (void)
 				break;
 
 #ifdef ECWOLF_TOUCH
-			if(!Paused && !IOSGame_HoldsGame()) // (the weapon wheel holds it still)
+			if(!Paused && !IOSGame_HoldsGame()) // (the weapon wheel and CAMERA hold it still)
 #else
 			if(!Paused)
 #endif
@@ -1127,10 +1127,16 @@ void PlayLoop (void)
 		}
 
 		PlayFrame();
+#ifdef ECWOLF_TOUCH
+		IOSGame_FrameDone(); // (CAMERA: a photo with the status bar)
+#endif
 
 		//
 		// MAKE FUNNY FACE IF BJ DOESN'T MOVE FOR AWHILE
 		//
+#ifdef ECWOLF_TOUCH
+		if(!IOSGame_HoldsGame()) // (held still: the face too)
+#endif
 		funnyticount += tics;
 
 		TexMan.UpdateAnimations(lasttimecount*14);

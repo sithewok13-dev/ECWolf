@@ -22,8 +22,12 @@ void IOSGame_SetInPlay(bool bInPlay);
 void IOSGame_Ticcmd(bool bFirstTic);
 // CheckKeys, in the play loop: quick save and quick load, asked for
 void IOSGame_CheckKeys();
-// PlayLoop: the game holds still (the weapon wheel is open)
+// PlayLoop: the game holds still (the weapon wheel is open; CAMERA's
+// selfie, Action Freeze or cinematic burst)
 bool IOSGame_HoldsGame();
+// PlayLoop, after PlayFrame: the frame is on the screen (CAMERA's photos
+// with the status bar)
+void IOSGame_FrameDone();
 // SDLFB::Update, as a frame goes to the screen: counted for the FPS
 // readout; and the window the game draws in
 void IOSGame_FrameDrawn();

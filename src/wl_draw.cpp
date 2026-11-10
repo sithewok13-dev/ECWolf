@@ -27,6 +27,9 @@
 #include "wl_state.h"
 #include "a_inventory.h"
 #include "thingdef/thingdef.h"
+#ifdef ECWOLF_TOUCH
+#include "IOSCamera.h"
+#endif
 
 /*
 =============================================================================
@@ -530,7 +533,11 @@ unsigned int CalcRotate (AActor *ob)
 	// this isn't exactly correct, as it should vary by a trig value,
 	// but it is close enough with only eight rotations
 
+#ifdef ECWOLF_TOUCH
+	viewangle = IOSCamera_RotateAngle(players[ConsolePlayer].camera->angle) + (centerx - ob->viewx)/8;
+#else
 	viewangle = players[ConsolePlayer].camera->angle + (centerx - ob->viewx)/8;
+#endif
 
 	angle = viewangle - ob->angle;
 
@@ -1138,6 +1145,9 @@ void WallRefresh (void)
 	fixed curbob = gamestate.victoryflag ? 0 : FixedMul(FixedMul(players[ConsolePlayer].bob, playerMovebob)>>1, finesine[bobangle]);
 
 	viewz = curbob - players[ConsolePlayer].mo->viewheight;
+#ifdef ECWOLF_TOUCH
+	IOSCamera_ViewHeight(viewshift, viewz); // (CAMERA's photo view)
+#endif
 
 	AsmRefresh();
 	ScalePost ();                   // no more optimization on last post
@@ -1146,11 +1156,26 @@ void WallRefresh (void)
 void CalcViewVariables()
 {
 	viewangle = players[ConsolePlayer].camera->angle;
+#ifdef ECWOLF_TOUCH
+	// (CAMERA's photo view: its own camera)
+	int32_t photoX = 0, photoY = 0;
+	uint32_t photoAngle = 0;
+	const bool photo = IOSCamera_View(photoX, photoY, photoAngle);
+	if(photo)
+		viewangle = photoAngle;
+#endif
 	midangle = viewangle>>ANGLETOFINESHIFT;
 	viewsin = finesine[viewangle>>ANGLETOFINESHIFT];
 	viewcos = finecosine[viewangle>>ANGLETOFINESHIFT];
 	viewx = players[ConsolePlayer].camera->x - FixedMul(focallength,viewcos);
 	viewy = players[ConsolePlayer].camera->y + FixedMul(focallength,viewsin);
+#ifdef ECWOLF_TOUCH
+	if(photo)
+	{
+		viewx = photoX;
+		viewy = photoY;
+	}
+#endif
 
 	focaltx = (short)(viewx>>TILESHIFT);
 	focalty = (short)(viewy>>TILESHIFT);
@@ -1224,6 +1249,11 @@ void R_RenderView()
 		DrawSnow(vbuf, vbufPitch);
 #endif
 
+#ifdef ECWOLF_TOUCH
+	// (CAMERA: the clean photo, before the weapon; none in the photo view)
+	IOSCamera_AfterScene(vbuf, vbufPitch, viewwidth, viewheight);
+	if(!IOSCamera_HidesWeapon())
+#endif
 	DrawPlayerWeapon ();    // draw player's hands
 
 	if((control[ConsolePlayer].buttonstate[bt_showstatusbar] || control[ConsolePlayer].buttonheld[bt_showstatusbar]) && viewsize == 21)
@@ -1253,18 +1283,30 @@ void    ThreeDRefresh (void)
 	if(players[ConsolePlayer].camera == NULL)
 		players[ConsolePlayer].camera = players[ConsolePlayer].mo;
 
+#ifdef ECWOLF_TOUCH
+	IOSCamera_RenderBegin(); // (CAMERA's photo view: applied for this drawing only)
+#endif
 //
 // clear out the traced array
 //
 	map->ClearVisibility();
 
 	vbuf = VL_LockSurface();
-	if(vbuf == NULL) return;
+	if(vbuf == NULL)
+	{
+#ifdef ECWOLF_TOUCH
+		IOSCamera_RenderEnd();
+#endif
+		return;
+	}
 
 	vbuf += screenofs;
 	vbufPitch = SCREENPITCH;
 
 	R_RenderView();
+#ifdef ECWOLF_TOUCH
+	IOSCamera_RenderEnd(); // (...and everything put back)
+#endif
 
 	VL_UnlockSurface();
 	vbuf = NULL;
