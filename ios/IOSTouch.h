@@ -7,23 +7,27 @@
    is being played it turns touches into:
      - a floating move stick under the left thumb (anywhere in the left 42%
        of the screen): analog movement, up the screen is forward, sideways
-       strafes
+       strafes; with Always Run off, a run marker (^^) above it: the thumb
+       slid up onto it runs straight ahead (as in the Jedi Knight port)
      - drag-to-look anywhere else: turning (Wolfenstein has no looking up
-       and down)
-     - tilt aiming (MENU's tray's GYRO: OFF, TOUCH, ALWAYS; SENS 1.0x, 1.5x,
-       2.0x, 3.0x): turning too
-     - buttons. Bottom right: FIRE, with USE (doors, switches), MAP (the
-       automap) and RUN (always run on or off, lit while on: ECWolf's own
-       Always Run setting) on an arc around it; dragging on them also turns.
-       Top left: NEXT WPN. Top right: QUICK SAVE, QUICK LOAD (0.3 s holds
-       with a ring) and MENU (a tap: the game's menu; held 0.45 s: the tray).
+       and down), at the tray's LOOK speed. No tilt aiming: Wolf3D has no
+       gyro (the owner's call).
+     - buttons. Bottom right: FIRE, with USE (doors, switches) beside it;
+       dragging on them also turns. Top left: NEXT WPN and MAP (the
+       automap). Top right: SAVE and LOAD (a tap: the game's Save Game /
+       Load Game menu; held 0.3 s with a ring: quick save / quick load) and
+       MENU (a tap: the game's menu; held 0.45 s: the tray). CHEAT (cheat
+       mode) between the top row's middle and SAVE.
      - NEXT WPN: a quick tap is the next weapon; a 10 pt slide opens the
        weapon wheel at once, a 0.3 s hold opens it to tap. One slice per
        weapon in the player's weapon slots (knife, pistol, machine gun, chain
        gun), with its picture from the game's own art and its ammo. The game
        holds still while it is open.
-     - MENU's tray: SENS, GYRO, OPACITY, FPS and the keyboard (the iOS
-       keyboard, typing into the game), with the build stamp under it.
+     - MENU's tray: LOOK (0.5x to 3x), ALWAYS RUN, OPACITY, FPS, CHEAT,
+       LEVEL (the cheat on) and the keyboard (the iOS keyboard, typing into
+       the game), with the build stamp under it.
+     - the sithewok cheat: god mode, every weapon and key, ammo kept full;
+       USE held 0.5 s: noclip; LEVEL: a list of the game's levels to go to.
    In ECWolf's menus, the title and story screens, intermissions and
    messages (IOSTOUCH_MENUS) a tap is Return (select, go on), a slide up,
    down, left or right moves that way (one step for each 30 pt), BACK is
@@ -50,10 +54,14 @@ enum {
 /* What the game says each frame besides the weapons */
 typedef struct IOSTouchHud {
   int bValid;
-  int bNoSaves;        /* no QUICK SAVE / QUICK LOAD (a network game) */
-  int bRunOn;          /* always run is on (RUN lit) */
+  int bNoSaves;        /* no SAVE / LOAD (a network game) */
+  int bRunOn;          /* Always Run is on (the tray's ALWAYS RUN lit; no run marker) */
   int bAutomap;        /* the automap is open (MAP lit) */
   int bKeyboard;       /* the iOS keyboard is up (the tray's keyboard lit) */
+  int bCheatAllowed;   /* the cheat can be on (single player) */
+  int ctLevels;        /* the levels the cheat's LEVEL lists (IOSGame_LevelInfo), 0: none */
+  int iLevelNow;       /* the one being played (1..ctLevels), 0: none of them */
+  unsigned int uWorld; /* changes with every level started or loaded */
   float afHudFrame[4]; /* (filled by the overlay: IOSTouch_GetHudFrame) */
 } IOSTouchHud;
 
@@ -65,7 +73,11 @@ enum {
   IOSTOUCH_REQ_QUICKLOAD = 1 << 3,
   IOSTOUCH_REQ_RESUME    = 1 << 4, /* unpause */
   IOSTOUCH_REQ_MAP       = 1 << 5, /* MAP: open or close the automap */
-  IOSTOUCH_REQ_RUN       = 1 << 6, /* RUN: always run on or off */
+  IOSTOUCH_REQ_RUN       = 1 << 6, /* the tray's ALWAYS RUN: on or off */
+  IOSTOUCH_REQ_SAVEMENU  = 1 << 7, /* SAVE tapped: the game's Save Game menu */
+  IOSTOUCH_REQ_LOADMENU  = 1 << 8, /* LOAD tapped: the game's Load Game menu */
+  IOSTOUCH_REQ_CHEATSOUND = 1 << 9, /* the cheat came on: its sound */
+  IOSTOUCH_REQ_LEVEL     = 1 << 10, /* a level picked in the cheat's list (IOSTouch_TakeLevelPick) */
 };
 
 /* The keys the menus get (IOSTouch_TakeMenuKey), one at a time */
@@ -85,6 +97,7 @@ enum {
 typedef struct IOSTouchInput {
   float fMoveX;           /* move stick: -1..1, right is + */
   float fMoveY;           /* -1..1, forward is + */
+  int bRun;               /* the stick's thumb on its run marker: running (straight ahead) */
   unsigned int ulButtons; /* IOSTOUCH_FIRE... held (or a quick tap) for this read */
   int iSelectWeapon;      /* -1 none, else the wheel's pick (an index into IOSTouchWeapons' list):
                              reported for two reads, then -1 for at least one, never in a read with
@@ -138,18 +151,15 @@ void IOSTouch_GetHudFrame(float afFrame[4]);
 /* The frame rate asked of the screen: fixed at 60 in Wolf3D (no switch in
    the tray). The game keeps to it too (i_ios.mm: IOS_FrameCap) */
 int IOSTouch_MaxFps(void);
-/* Hide now (the app is going to the background), and stop tilt aiming's
-   motion updates; the next update shows it again */
+/* Hide now (the app is going to the background); the next update shows it
+   again */
 void IOSTouch_Hide(void);
 /* Once per game tic: the stick and the buttons. A button tapped too quickly
    for any tic to see it is reported for two reads, then up for one. */
 void IOSTouch_ReadInput(IOSTouchInput *pInput);
-/* Look movement since the last call, in points of finger travel x the look
-   speed (+x right, +y down) */
+/* Look movement since the last call, in degrees for the view to turn
+   (finger travel x the look speed; +x right, +y down) */
 void IOSTouch_TakeLook(float *pfDX, float *pfDY);
-/* Tilt aiming since the last call, in degrees for the view to turn (+ left)
-   and tilt (+ up) */
-void IOSTouch_TakeGyro(float *pfYaw, float *pfPitch);
 
 /* Every frame before IOSTouch_Update: what the player has, for the weapon
    wheel. A wheel open while the game couldn't take a pick (or whose list
@@ -160,6 +170,22 @@ void IOSTouch_SetWeapons(const IOSTouchWeapons *pw);
 int IOSTouch_HoldsGame(void);
 /* A line of news over the game for fSeconds */
 void IOSTouch_ShowMessage(const char *str, double fSeconds);
+
+/* The sithewok cheat. Whether it is on (and allowed: single player), and
+   noclip (USE held while it's on); off at each launch. The word typed on the
+   keyboard (IOSGame.cpp watches for it): on, or off. The level picked in the
+   cheat's list (1..ctLevels; 0: none), once. */
+int IOSTouch_CheatOn(void);
+int IOSTouch_CheatNoclip(void);
+void IOSTouch_CheatTyped(void);
+int IOSTouch_TakeLevelPick(void);
+/* CHEAT's picture, from the game's own art (RGBA as the wheel's icons): the
+   overlay asks once (IOSTouch_WantsCheatIcon); NULL: none, CHEAT says CHEAT */
+int IOSTouch_WantsCheatIcon(void);
+void IOSTouch_SetCheatIcon(const unsigned char *pubRGBA, int iWidth, int iHeight);
+/* (the game's, IOSGame.cpp) level i (1..ctLevels) for the cheat's list: its
+   name and the line under it; 0: no such level */
+int IOSGame_LevelInfo(int i, char *strName, int ctName, char *strDetail, int ctDetail);
 
 #ifdef __cplusplus
 }

@@ -17,8 +17,8 @@
      moveby <id> <dx> <dy>      ...by this much
      up <id> | cancel <id>      it lifts (iOS takes it away)
      tapslice <i>               a tap on the open wheel's slice i
-     gyro <yaw> <pitch>         tilt aiming: degrees (+ left, + up), as a frame's
-     state                      what shows, the wheel, the tray
+     state                      what shows, the wheel, the tray, the stick, the cheat
+     levels / level <i>         the cheat's list of levels / a tap on row i
 */
 
 #define _GNU_SOURCE
@@ -41,12 +41,6 @@ static double IOSTouchRig_Now(void)
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return ts.tv_sec + ts.tv_nsec * 1e-9;
-}
-
-// (no motion sensor in the rig: tilt aiming comes from the "gyro" command)
-static void IOSTouch_GyroRunUpdates(int bRun)
-{
-  (void)bRun;
 }
 
 static int _bRigLaidOut = 0;
@@ -103,11 +97,12 @@ void IOSTouch_Hide(void)
 // ---------------------------------------------------------------- the commands
 
 static const struct { const char *name; int button; } _aRigNames[] = {
-  { "FIRE", BTN_FIRE }, { "USE", BTN_USE }, { "MAP", BTN_MAP }, { "RUN", BTN_RUN },
-  { "NEXTWPN", BTN_NEXTWPN }, { "QUICKSAVE", BTN_QUICKSAVE }, { "QUICKLOAD", BTN_QUICKLOAD },
+  { "FIRE", BTN_FIRE }, { "USE", BTN_USE }, { "MAP", BTN_MAP }, { "CHEAT", BTN_CHEAT },
+  { "NEXTWPN", BTN_NEXTWPN }, { "SAVE", BTN_QUICKSAVE }, { "LOAD", BTN_QUICKLOAD },
   { "MENU", BTN_MENU }, { "RESUME", BTN_RESUME }, { "BACK", BTN_BACK }, { "MENUUP", BTN_MENUUP },
-  { "MENUDOWN", BTN_MENUDOWN }, { "TRAYSENS", BTN_TRAYSENS }, { "TRAYGYRO", BTN_TRAYGYRO },
-  { "TRAYOPACITY", BTN_TRAYOPACITY }, { "TRAYFPS", BTN_TRAYFPS }, { "TRAYKEYS", BTN_TRAYKEYS },
+  { "MENUDOWN", BTN_MENUDOWN }, { "TRAYLOOK", BTN_TRAYLOOK }, { "TRAYRUN", BTN_TRAYRUN },
+  { "TRAYOPACITY", BTN_TRAYOPACITY }, { "TRAYFPS", BTN_TRAYFPS }, { "TRAYCHEAT", BTN_TRAYCHEAT },
+  { "TRAYLEVEL", BTN_TRAYLEVEL }, { "TRAYKEYS", BTN_TRAYKEYS },
 };
 
 // The fingers: each a touch's identity (only its address is used)
@@ -172,10 +167,15 @@ static const char *IOSTouchRig_ButtonName(int b)
 
 static void IOSTouchRig_State(void)
 {
-  printf("rig: state mode %s reading %d tray %d opacity %.2f/%d wheel %d tapmode %d hot %d holds %d fps %d/%d maxfps %d gyro %d sens %.1f menukeys %d\n",
+  printf("rig: state mode %s reading %d tray %d opacity %.2f/%d wheel %d tapmode %d hot %d holds %d fps %d/%d maxfps %d look %.2fx menukeys %d\n",
          _astrModes[_iMode], _bReading, _bTrayOpen, (double)_fOpacity, _bOpacityOpen, _bWheelOpen, _bWheelTapMode,
-         IOSTouch_WheelHot(), IOSTouch_HoldsGame(), _bShowFps, _iFpsShown, _iMaxFps, _iGyroMode, (double)_afGyroSens[_iGyroSens],
-         _ctMenuKeys);
+         IOSTouch_WheelHot(), IOSTouch_HoldsGame(), _bShowFps, _iFpsShown, _iMaxFps, (double)_fLookScale, _ctMenuKeys);
+  printf("rig: stick %d at %.0f,%.0f move %.2f,%.2f run %d marker %d at %.0f,%.0f (deg %.0f) alwaysrun %d\n", _bStickActive,
+         _fStickOriginX, _fStickOriginY, (double)_fMoveX, (double)_fMoveY, _bMoveRun, _bRunMarker, _fRunX, _fRunY, _fRunDeg,
+         _hud.bRunOn);
+  printf("rig: cheat shown %d on %d noclip %d allowed %d rings %.2f/%.2f levels %d now %d list %d icon %dx%d\n", _bShowCheat,
+         _bCheatOn, _bNoclip, _hud.bCheatAllowed, (double)_fCheatRing, (double)_fNoclipRing, _hud.ctLevels, _hud.iLevelNow,
+         _bLevelListOpen, _iCheatIconW, _iCheatIconH);
   printf("rig: shown");
   for (int i = 0; i < IOSTOUCH_NUM_BUTTONS; i++) {
     if (IOSTouch_IsShown(i)) printf(" %s(%.0f,%.0f)", IOSTouchRig_ButtonName(i), _aButtons[i].x, _aButtons[i].y);
@@ -247,15 +247,21 @@ void IOSTouchRig_Command(const char *cmd)
       printf("rig: tapslice %d \"%s\" at %.0f,%.0f, wheel now %d\n", i, m->aSlots[i].strName, x, y, _bWheelOpen);
     }
   }
-  else if (!strcmp(op, "gyro") && argc >= 3) {
-    // as IOSTouch_GyroFrame hands a frame's turn on (at SENS 1.0x)
-    os_unfair_lock_lock(&_lock);
-    if (_bReading) {
-      _fGyroYaw += (float)atof(argv[1]);
-      _fGyroPitch += (float)atof(argv[2]);
+  else if (!strcmp(op, "level") && argc >= 2) {
+    // a tap on row i (1..) of the cheat's open list of levels, as the view's
+    char strName[128] = "", strDetail[128] = "";
+    const int i = atoi(argv[1]);
+    const int bInfo = IOSGame_LevelInfo(i, strName, sizeof(strName), strDetail, sizeof(strDetail));
+    printf("rig: level %d \"%s\" \"%s\" (list %d, info %d)\n", i, strName, strDetail, _bLevelListOpen, bInfo);
+    IOSTouch_PickLevel(i);
+  }
+  else if (!strcmp(op, "levels")) {
+    // the cheat's list, as the view would show it
+    for (int i = 1; i <= _hud.ctLevels; i++) {
+      char strName[128] = "", strDetail[128] = "";
+      if (!IOSGame_LevelInfo(i, strName, sizeof(strName), strDetail, sizeof(strDetail))) break;
+      printf("rig: levels %2d%s %s | %s\n", i, i == _hud.iLevelNow ? "*" : " ", strName, strDetail);
     }
-    os_unfair_lock_unlock(&_lock);
-    printf("rig: gyro %s %s (reading %d)\n", argv[1], argv[2], _bReading);
   }
   else if (!strcmp(op, "state")) {
     IOSTouchRig_State();

@@ -9,10 +9,12 @@
 ** the weapon wheel (the player's weapon slots, so a mod's weapons come
 ** too), and passes on what the player asked for: the menu (Escape), the
 ** menus' keys (taps and slides, pressed as real keys, one at a time), the
-** automap, always run, the iOS keyboard; quick save and load go in the play
-** loop's CheckKeys. Once a tic the stick, the buttons, the look (turning:
-** Wolfenstein has no looking up and down) and the weapon picks go into the
-** tic's command, whatever keys are bound.
+** automap, always run, the iOS keyboard, SAVE's and LOAD's menus (F2, F3);
+** quick save and load go in the play loop's CheckKeys. Once a tic the stick
+** (running on its run marker), the buttons, the look (turning: Wolfenstein
+** has no looking up and down) and the weapon picks go into the tic's
+** command, whatever keys are bound; and the sithewok cheat is kept up (god
+** mode, every weapon and key, ammo full, noclip; its list of levels).
 */
 
 #include <string.h>
@@ -33,8 +35,13 @@
 #include "wl_agent.h"
 #include "wl_game.h"
 #include "wl_play.h"
+#include "wl_debug.h"	// (before wl_net.h, which names its DebugCmd)
 #include "wl_net.h"
 #include "wl_loadsave.h"
+#include "id_sd.h"
+#include "g_mapinfo.h"
+#include "gamemap.h"
+#include "g_shared/a_keys.h"
 #include "weaponslots.h"
 #include "a_inventory.h"
 #include "r_sprites.h"
@@ -50,6 +57,7 @@ namespace GameSave
 	int TouchQuickLoad();		// 1 loaded, 0 nothing to load, -1 it failed
 }
 extern bool menusAreFaded;	// wl_menu.cpp: no menu up
+void IOSCheat_GiveAll(player_t &player);	// wl_debug.cpp: every weapon and the ammo
 
 static SDL_Window *gameWindow = NULL;
 static bool inPlay = false;
@@ -247,6 +255,7 @@ static int TouchMode()
 static SDL_Scancode keyDown = SDL_SCANCODE_UNKNOWN;
 static Uint32 keyUpAt = 0, keyNextAt = 0;
 static bool escapeWanted = false;
+static SDL_Scancode menuKeyWanted = SDL_SCANCODE_UNKNOWN; // SAVE's or LOAD's tap: F2 or F3
 
 static void PostKey(SDL_Scancode sc, bool down)
 {
@@ -293,6 +302,11 @@ static void PumpKeys()
 	{
 		escapeWanted = false;
 		sc = SDL_SCANCODE_ESCAPE;
+	}
+	else if(menuKeyWanted != SDL_SCANCODE_UNKNOWN)
+	{
+		sc = menuKeyWanted;
+		menuKeyWanted = SDL_SCANCODE_UNKNOWN;
 	}
 	else
 		sc = ScancodeOf(IOSTouch_TakeMenuKey());
@@ -547,6 +561,262 @@ static void FeedIcons()
 
 //---------------------------------------------------------------------------
 //
+// The sithewok cheat (IOSTouch.h): while it's on, god mode, every weapon and
+// key (given as it comes on and in every level started or loaded), the ammo
+// kept full, noclip while USE's hold has it on. Turned off, what it gave is
+// kept; god mode and noclip go off (if the cheat put them on). Single
+// player only. Its list of levels: the current game's maps (MAP01...), by
+// episode and floor.
+//
+//---------------------------------------------------------------------------
+
+static bool cheatGod = false, cheatNoclip = false;
+static const AActor *cheatGivenMo = NULL;
+static char cheatGivenMap[9] = "";
+static int32_t cheatLastTime = 0;
+// Every level started or loaded: the player's body, the map or the clock
+// going back changed (for IOSTouchHud.uWorld, and the cheat's giving)
+static const AActor *worldMo = NULL;
+static char worldMap[9] = "";
+static int32_t worldTime = 0;
+static unsigned int worldCount = 1;
+
+static bool CheatAllowed()
+{
+	return Net::InitVars.mode == Net::MODE_SinglePlayer;
+}
+
+static void NoteWorld(const player_t *p)
+{
+	if(!p)
+		return;
+	if(p->mo != worldMo || strncmp(worldMap, gamestate.mapname, 8) != 0 || (int32_t)gamestate.TimeCount < worldTime)
+	{
+		worldMo = p->mo;
+		strncpy(worldMap, gamestate.mapname, 8);
+		worldMap[8] = 0;
+		worldCount++;
+	}
+	worldTime = gamestate.TimeCount;
+}
+
+// Once a tic in play
+static void KeepCheat()
+{
+	player_t *p = Player();
+	const bool on = p && CheatAllowed() && IOSTouch_CheatOn();
+	if(!on)
+	{
+		if(cheatGod)
+			godmode = 0;
+		if(cheatNoclip)
+			noclip = false;
+		cheatGod = cheatNoclip = false;
+		cheatGivenMo = NULL;
+		return;
+	}
+	if(!godmode)
+	{
+		godmode = 1;
+		cheatGod = true;
+	}
+	const bool wantNoclip = IOSTouch_CheatNoclip() != 0;
+	if(wantNoclip != noclip && (wantNoclip || cheatNoclip))
+	{
+		noclip = wantNoclip;
+		cheatNoclip = wantNoclip;
+	}
+	// everything, as it comes on and in each level started or loaded
+	if(p->mo != cheatGivenMo || strncmp(cheatGivenMap, gamestate.mapname, 8) != 0 || (int32_t)gamestate.TimeCount < cheatLastTime)
+	{
+		cheatGivenMo = p->mo;
+		strncpy(cheatGivenMap, gamestate.mapname, 8);
+		cheatGivenMap[8] = 0;
+		IOSCheat_GiveAll(*p);
+		P_GiveKeys(p->mo, 101);
+		if(p->health < 100)
+			p->mo->health = p->health = 100;
+		if(StatusBar)
+			StatusBar->DrawStatusBar();
+		printf("iOS: cheat gave everything (%s)\n", gamestate.mapname);
+	}
+	cheatLastTime = gamestate.TimeCount;
+	// the ammo kept full
+	for(AInventory *item = p->mo->inventory;item;item = item->inventory)
+	{
+		if(item->IsKindOf(NATIVE_CLASS(Ammo)) && item->amount < item->maxamount)
+			item->amount = item->maxamount;
+	}
+}
+
+// The levels: the maps this game has, in order
+#define IOSGAME_MAX_LEVELS 99
+static char levelNames[IOSGAME_MAX_LEVELS][9];
+static int levelCount = -1;
+
+static void FindLevels()
+{
+	if(levelCount >= 0)
+		return;
+	levelCount = 0;
+	for(int i = 1;i <= IOSGAME_MAX_LEVELS;i++)
+	{
+		FString name;
+		name.Format("MAP%02d", i);
+		if(GameMap::CheckMapExists(name))
+		{
+			strncpy(levelNames[levelCount], name.GetChars(), 8);
+			levelNames[levelCount++][8] = 0;
+		}
+	}
+}
+
+static int CurrentLevel()
+{
+	for(int i = 0;i < levelCount;i++)
+		if(stricmp(levelNames[i], gamestate.mapname) == 0)
+			return i + 1;
+	return 0;
+}
+
+// An episode's name, its last line ("Episode 1\nEscape from Wolfenstein")
+static FString EpisodeTitle(unsigned int e)
+{
+	FString n = EpisodeInfo::GetEpisode(e).EpisodeName;
+	const long nl = n.LastIndexOf('\n');
+	if(nl >= 0)
+		n = n.Mid(nl + 1);
+	return n;
+}
+
+int IOSGame_LevelInfo(int i, char *strName, int ctName, char *strDetail, int ctDetail)
+{
+	FindLevels();
+	if(i < 1 || i > levelCount)
+		return 0;
+	const char *map = levelNames[i - 1];
+	const LevelInfo &info = LevelInfo::Find(map);
+	const bool known = stricmp(info.MapName, map) == 0;
+	// its episode: the one whose first map is in its cluster
+	int episode = -1;
+	for(unsigned int e = 0;known && e < EpisodeInfo::GetNumEpisodes();e++)
+	{
+		const LevelInfo &start = LevelInfo::Find(EpisodeInfo::GetEpisode(e).StartMap);
+		if(stricmp(start.MapName, EpisodeInfo::GetEpisode(e).StartMap) == 0 && start.Cluster == info.Cluster)
+		{
+			episode = (int)e;
+			break;
+		}
+	}
+	// a secret floor: some map's secret exit goes there
+	bool secret = false;
+	for(int k = 0;k < levelCount && known;k++)
+	{
+		const LevelInfo &o = LevelInfo::Find(levelNames[k]);
+		if(k != i - 1 && stricmp(o.MapName, levelNames[k]) == 0 && o.NextSecret.CompareNoCase(map) == 0 && o.NextSecret.CompareNoCase(o.NextMap) != 0)
+			secret = true;
+	}
+	// "Floor 3", or its MAPINFO name (Spear of Destiny's "Tunnels 1"...)
+	FString name, detail;
+	const FString *own = known ? info.GetMapInfoName() : NULL;
+	if(own && own->Len() > 0)
+		name.Format("%s%s", own->GetChars(), secret ? " (secret)" : "");
+	else if(known && info.FloorNumber.Len() > 0)
+		name.Format("Floor %s%s", info.FloorNumber.GetChars(), secret ? " (secret)" : "");
+	else
+		name = map;
+	if(episode >= 0 && EpisodeInfo::GetNumEpisodes() > 1)
+	{
+		const FString title = EpisodeTitle(episode);
+		name = title.Len() > 0 ? FString(title + ", " + name) : name;
+		detail.Format("Episode %d \xC2\xB7 %s", episode + 1, map);
+	}
+	else if(own && own->Len() > 0 && known && info.FloorNumber.Len() > 0)
+		detail.Format("Floor %s \xC2\xB7 %s", info.FloorNumber.GetChars(), map);
+	else
+		detail = map;
+	snprintf(strName, ctName, "%s", name.GetChars());
+	snprintf(strDetail, ctDetail, "%s", detail.GetChars());
+	return 1;
+}
+
+static void WarpTo(int i)
+{
+	FindLevels();
+	player_t *p = Player();
+	if(i < 1 || i > levelCount || !p || !CheatAllowed() || playstate != ex_stillplaying)
+		return;
+	char name[128], detail[128];
+	IOSGame_LevelInfo(i, name, sizeof(name), detail, sizeof(detail));
+	FString msg;
+	msg.Format("Going to %s", name);
+	IOSTouch_ShowMessage(msg, 2.0);
+	printf("iOS: cheat warp to %s (%s)\n", levelNames[i - 1], name);
+	DebugCmd cmd = {DEBUG_Warp};
+	cmd.ArgS = levelNames[i - 1];
+	Net::DebugKey(cmd);
+}
+
+// CHEAT's picture: BJ's face from the status bar, grinning -- god mode's
+// (Spear of Destiny), else the grin of a chain gun found, else the plain one
+static void FeedCheatIcon()
+{
+	if(!IOSTouch_WantsCheatIcon())
+		return;
+	static const char *const faces[] = { "STFGOD0", "STFEVL0", "STFST00" };
+	TArray<BYTE> px;
+	int w = 0, h = 0;
+	for(unsigned int i = 0;i < countof(faces);i++)
+	{
+		const FTextureID id = TexMan.CheckForTexture(faces[i], FTexture::TEX_Any);
+		if(id.isValid() && MakeIcon(TexMan[id], px, w, h))
+		{
+			IOSTouch_SetCheatIcon(&px[0], w, h);
+			printf("iOS: CHEAT's picture is %s (%dx%d)\n", faces[i], w, h);
+			return;
+		}
+	}
+	IOSTouch_SetCheatIcon(NULL, 0, 0);
+}
+
+// The word typed: "sithewok", as letter keys going down (the iOS keyboard
+// sends each letter typed as its key too, and as text: the keys alone count)
+static char typed[16] = "";
+static void Typed(char c)
+{
+	c = (char)tolower((unsigned char)c);
+	if(c < 'a' || c > 'z')
+		return; // (Shift goes down round a capital)
+	size_t n = strlen(typed);
+	if(n >= sizeof(typed) - 1)
+	{
+		memmove(typed, typed + 1, n);
+		n--;
+	}
+	typed[n] = c;
+	typed[n + 1] = 0;
+	static const char word[] = "sithewok";
+	const size_t wl = sizeof(word) - 1;
+	if(n + 1 >= wl && strcmp(typed + n + 1 - wl, word) == 0)
+	{
+		typed[0] = 0;
+		IOSTouch_CheatTyped();
+	}
+}
+
+static int SDLCALL WatchTyping(void *, SDL_Event *ev)
+{
+	if(ev->type == SDL_KEYDOWN && !ev->key.repeat)
+	{
+		const SDL_Keycode k = ev->key.keysym.sym;
+		if(k >= SDLK_a && k <= SDLK_z)
+			Typed((char)k);
+	}
+	return 1;
+}
+
+//---------------------------------------------------------------------------
+//
 // Once a frame
 //
 //---------------------------------------------------------------------------
@@ -564,9 +834,16 @@ void IOSGame_Frame()
 	if(inFrame)
 		return; // (a load or save it set off pumps events too)
 	inFrame = true;
+	static bool watching = false;
+	if(!watching)
+	{
+		watching = true;
+		SDL_AddEventWatch(WatchTyping, NULL);
+	}
 	const int mode = TouchMode();
 	lastMode = mode;
 	player_t *p = Player();
+	NoteWorld(p);
 
 	IOSTouchWeapons wpn;
 	IOSTouchHud hud;
@@ -579,9 +856,19 @@ void IOSGame_Frame()
 	hud.bRunOn = alwaysrun;
 	hud.bAutomap = automap != AMA_Off;
 	hud.bKeyboard = SDL_IsTextInputActive();
+	hud.bCheatAllowed = CheatAllowed();
+	if(mode == IOSTOUCH_GAMEPLAY)
+	{
+		FindLevels();
+		hud.ctLevels = levelCount;
+		hud.iLevelNow = CurrentLevel();
+	}
+	hud.uWorld = worldCount;
 	IOSTouch_SetWeapons(&wpn);
 	if(mode == IOSTOUCH_GAMEPLAY)
 		FeedIcons();
+	if(mode != IOSTOUCH_HIDDEN)
+		FeedCheatIcon();
 
 	const int req = IOSTouch_Update(gameWindow, mode, &hud, framesDrawn);
 
@@ -594,14 +881,21 @@ void IOSGame_Frame()
 		if(req & IOSTOUCH_REQ_QUICKSAVE) wantQuickSave = true;
 		else if(req & IOSTOUCH_REQ_QUICKLOAD) wantQuickLoad = true;
 		if(req & IOSTOUCH_REQ_MAP) wantMap = true;
+		if(req & IOSTOUCH_REQ_SAVEMENU) menuKeyWanted = SDL_SCANCODE_F2;
+		else if(req & IOSTOUCH_REQ_LOADMENU) menuKeyWanted = SDL_SCANCODE_F3;
+		if(req & IOSTOUCH_REQ_LEVEL) WarpTo(IOSTouch_TakeLevelPick());
 	}
 	if((req & IOSTOUCH_REQ_RESUME) && (Paused & 1))
 		wantPause = true;
 	if(req & IOSTOUCH_REQ_RUN)
 	{
+		// ECWolf's own Always Run (its Control menu's), kept in its settings
 		alwaysrun = !alwaysrun;
-		IOSTouch_ShowMessage(alwaysrun ? "Always run on" : "Always run off", 1.5);
+		WriteConfig();
+		IOSTouch_ShowMessage(alwaysrun ? "Always run on: the stick always runs" : "Always run off: slide up onto ^^ to run", 2.0);
 	}
+	if(req & IOSTOUCH_REQ_CHEATSOUND)
+		SD_PlaySound("misc/yeah"); // ("Yeah!", the end of a level's 100% bonus)
 	PumpKeys();
 #ifdef ECWOLF_IOSRIG
 	RigFrame();
@@ -634,7 +928,7 @@ void IOSGame_CheckKeys()
 	else
 	{
 		const int r = GameSave::TouchQuickLoad();
-		IOSTouch_ShowMessage(r > 0 ? "Quick load" : (r == 0 ? "No quick save yet (hold QUICK SAVE)" : "The quick save couldn't be loaded"), r == 0 ? 3.0 : 1.5);
+		IOSTouch_ShowMessage(r > 0 ? "Quick load" : (r == 0 ? "No quick save yet (hold SAVE)" : "The quick save couldn't be loaded"), r == 0 ? 3.0 : 1.5);
 		printf("iOS: quick load (%d)\n", r);
 		if(r > 0)
 			DrawPlayBorderSides();
@@ -652,6 +946,7 @@ static unsigned int lastButtons = 0;
 static int lastPick = -1;
 static double turnLeft = 0.0;
 static float lastMoveX = 0.f, lastMoveY = 0.f;
+static bool lastRun = false;
 
 void IOSGame_Ticcmd(bool bFirstTic)
 {
@@ -660,7 +955,10 @@ void IOSGame_Ticcmd(bool bFirstTic)
 	IOSTouch_ReadInput(&in);
 	lastMoveX = in.fMoveX;
 	lastMoveY = in.fMoveY;
-	const int delta = alwaysrun ? RUNMOVE : BASEMOVE;
+	lastRun = in.bRun != 0;
+	// (the stick on its run marker runs; with Always Run on, it always does)
+	const int delta = (alwaysrun || in.bRun) ? RUNMOVE : BASEMOVE;
+	KeepCheat();
 	cmd.controly -= (int)lround(in.fMoveY * delta);
 	cmd.controlstrafe += (int)lround(in.fMoveX * delta);
 	const unsigned int b = in.ulButtons;
@@ -688,15 +986,13 @@ void IOSGame_Ticcmd(bool bFirstTic)
 	}
 	if(bFirstTic)
 	{
-		// The look and tilt aiming of the frame: turning, in the units
-		// ControlMovement takes (1/ANGLESCALE = 1/20 of a degree a count;
-		// + turns right)
-		float dx, dy, yaw, pitch;
+		// The look of the frame: turning, in the units ControlMovement
+		// takes (1/ANGLESCALE = 1/20 of a degree a count; + turns right)
+		float dx, dy;
 		IOSTouch_TakeLook(&dx, &dy);
-		IOSTouch_TakeGyro(&yaw, &pitch);
 		if(lastMode == IOSTOUCH_GAMEPLAY && !Paused && !IOSTouch_HoldsGame())
 		{
-			turnLeft += (dx - yaw) * 20.0;
+			turnLeft += dx * 20.0;
 			const int turn = (int)turnLeft;
 			turnLeft -= turn;
 			cmd.controlx += turn;
@@ -725,7 +1021,7 @@ void IOSGame_TextInput(bool bOn)
 // The Linux rig (ios/rig): a script of touches and checks
 // (IOSRIG_SCRIPT), one command a line, run a frame at a time: "frame <n>"
 // waits until frame n of the game's (frames pumped), "wait <n>" n more
-// frames; "pos" says where the player is and what the game is doing,
+// frames, "waitplay" until a level is being played; "pos" says where the player is and what the game is doing,
 // "shot <file>" saves the X screen as a picture,
 // "key <name>" presses a key (SDL's name), "quit" ends the game; anything
 // else is a touch command for the overlay (rig/IOSTouchRig.c)
@@ -754,7 +1050,15 @@ static void RigPos()
 		for(int i = 0;i < wpn.ctWeapons;i++)
 			printf(" [%s %d icon %s]", wpn.astrName[i], wpn.aiAmmo[i], WeaponTexture(wheelClasses[i]) ? "yes" : "no");
 	}
-	printf(" move %.2f,%.2f cmd %d,%d,%d\n", lastMoveX, lastMoveY, control[ConsolePlayer].controlx, control[ConsolePlayer].controly,
+	printf(" god %d noclip %d", godmode, (int)noclip);
+	if(p)
+	{
+		printf(" keys");
+		for(AInventory *item = p->mo->inventory;item;item = item->inventory)
+			if(item->IsKindOf(NATIVE_CLASS(Key)))
+				printf(" %s", item->GetClass()->GetName().GetChars());
+	}
+	printf(" move %.2f,%.2f run %d cmd %d,%d,%d\n", lastMoveX, lastMoveY, (int)lastRun, control[ConsolePlayer].controlx, control[ConsolePlayer].controly,
 		control[ConsolePlayer].controlstrafe);
 	fflush(stdout);
 }
@@ -764,7 +1068,14 @@ static void RigFrame()
 	static FILE *script = NULL;
 	static bool opened = false;
 	static unsigned int waitUntil = 0, frames = 0;
+	static bool waitPlay = false;
 	frames++;
+	if(waitPlay)
+	{
+		if(TouchMode() != IOSTOUCH_GAMEPLAY)
+			return;
+		waitPlay = false;
+	}
 	if(!opened)
 	{
 		opened = true;
@@ -791,6 +1102,11 @@ static void RigFrame()
 		else if(!strncmp(line, "wait ", 5))
 		{
 			waitUntil = frames + (unsigned int)atoi(line + 5);
+			return;
+		}
+		else if(!strcmp(line, "waitplay"))
+		{
+			waitPlay = true; // (until a level is being played again)
 			return;
 		}
 		else if(!strcmp(line, "pos"))

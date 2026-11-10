@@ -5,18 +5,17 @@
 
    Everything up to the overlay view is plain C: the buttons and their
    layout, the state shared with the game, and what each touch does (the
-   stick, looking, the buttons, the QUICK SAVE, QUICK LOAD and MENU holds,
-   MENU's tray, the FPS count, tilt aiming, NEXT WPN's taps, slides and
-   holds and the weapon wheel they open: its slices, what it picks, its
-   layout; the menus' taps and slides). The view below only hands UIKit's
-   touches and CoreMotion's samples to it and shows its state, so the Linux
+   stick and its run marker, looking, the buttons, SAVE's and LOAD's taps
+   and holds, MENU's hold, MENU's tray, the FPS count, the sithewok cheat,
+   NEXT WPN's taps, slides and holds and the weapon wheel they open: its
+   slices, what it picks, its layout; the menus' taps and slides). The view
+   below only hands UIKit's touches to it and shows its state, so the Linux
    test rig (ios/rig/IOSTouchRig.c, built with IOSTOUCH_RIG, as C, without
    UIKit) drives this very code. */
 
 #ifndef IOSTOUCH_RIG
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
-#import <CoreMotion/CoreMotion.h>
 #import <AudioToolbox/AudioToolbox.h>
 #include <os/lock.h>
 #include "SDL.h"
@@ -33,6 +32,7 @@ static double IOSTouchRig_Now(void);
 #endif
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "IOSTouch.h"
 
@@ -41,6 +41,14 @@ static double IOSTouchRig_Now(void);
 // Wolfenstein doesn't use). IOSGame.cpp turns the player by it directly.
 #define IOSTOUCH_LOOK_SCALE_X 0.64f
 #define IOSTOUCH_LOOK_SCALE_Y 0.39f
+// ...times the look speed set with MENU's tray's LOOK (as in the Serious Sam
+// port): a tap goes on to the next of _afLookSteps (after the last, back to
+// the first), held IOSTOUCH_MENU_HOLD it goes back to 1x (build 2's feel).
+// Kept in the app's settings (IOSTOUCH_LOOKSCALE_DEFAULTS_KEY).
+static const float _afLookSteps[] = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f };
+#define IOSTOUCH_LOOK_NUM_STEPS ((int)(sizeof(_afLookSteps) / sizeof(_afLookSteps[0])))
+#define IOSTOUCH_LOOKSCALE_MIN 0.25f
+#define IOSTOUCH_LOOKSCALE_MAX 4.0f
 // Stick: radius in points; it appears wherever the left thumb lands in the
 // left IOSTOUCH_STICK_ZONE of the screen, and only while that thumb is down.
 // Pushed past IOSTOUCH_STICK_DEADZONE of the radius it starts moving, and by
@@ -50,13 +58,32 @@ static double IOSTouchRig_Now(void);
 #define IOSTOUCH_STICK_RADIUS 60.0f
 #define IOSTOUCH_STICK_DEADZONE 0.15f
 #define IOSTOUCH_STICK_FULL 0.30f
+// Running, as in the Jedi Knight port: while ECWolf's Always Run is off, a
+// run marker shows with the stick -- a small circle (radius IOSTOUCH_RUN_R)
+// IOSTOUCH_RUN_DIST above the stick's centre, joined to its ring by a line.
+// Where the top row or the top of the screen is in the way it comes down
+// toward the stick, no nearer than IOSTOUCH_RUN_MIN_DIST; where even that
+// doesn't fit, there is no marker and the stick only walks. The thumb pushed
+// up past the ring to it -- at least IOSTOUCH_RUN_ON from the stick's centre,
+// pointing within IOSTOUCH_RUN_CONE degrees of the marker -- runs straight
+// ahead, the knob on the marker; back under IOSTOUCH_RUN_OFF, or more than
+// IOSTOUCH_RUN_CONE_OFF degrees off, it walks again. With Always Run on
+// (the tray's ALWAYS RUN) the stick always runs and there is no marker.
+#define IOSTOUCH_RUN_R 15.0
+#define IOSTOUCH_RUN_DIST 100.0
+#define IOSTOUCH_RUN_MIN_DIST 76.0
+#define IOSTOUCH_RUN_ON 70.0
+#define IOSTOUCH_RUN_OFF 60.0
+#define IOSTOUCH_RUN_CONE 30.0
+#define IOSTOUCH_RUN_CONE_OFF 40.0
 // Buttons show at this opacity while untouched, so they hide less of the game;
 // a touched one shows at full strength
 #define IOSTOUCH_IDLE_ALPHA 0.65
 // Edge-to-edge gap between the buttons around FIRE (the arc)
 #define IOSTOUCH_CLUSTER_GAP 30.0
-// QUICK SAVE and QUICK LOAD have to be held this long, so a stray tap can't
-// save over the quicksave (the one QUICK LOAD loads) or throw away progress
+// SAVE and LOAD have to be held this long for a quick save or load (a tap
+// opens the game's Save Game or Load Game menu), so a stray tap can't
+// save over the quicksave (the one LOAD loads) or throw away progress
 #define IOSTOUCH_QUICKSAVE_HOLD 0.3
 #define IOSTOUCH_QUICKLOAD_HOLD 0.3
 // NEXT WPN takes three gestures (as Jedi Knight's FORCE
@@ -64,7 +91,7 @@ static double IOSTouchRig_Now(void);
 // the touch's own clock, never IOSTOUCH_WHEEL_OPEN_SLIDE from where it went
 // down) is the next / previous weapon, as it lifts. Sliding that far opens
 // the weapon wheel at once, to slide to a slice; held still for
-// IOSTOUCH_WHEEL_HOLD (known as QUICK SAVE's hold is) it opens to tap one.
+// IOSTOUCH_WHEEL_HOLD (known as SAVE's hold is) it opens to tap one.
 // Sliding to pick is measured from where the thumb went down: it points
 // nowhere until IOSTOUCH_WHEEL_DEAD away, the point it is measured from
 // trails at most IOSTOUCH_WHEEL_LEASH behind the thumb, and a slice stays
@@ -100,41 +127,15 @@ static double IOSTouchRig_Now(void);
 // The HUD's frame (IOSTouch_GetHudFrame) keeps its corners this far inside the
 // screen's rounded corners
 #define IOSTOUCH_HUD_CORNER_GAP 2.0
-// Tilt aiming (see IOSTouch_GyroFrame), as in the Jedi Knight port.
-// CoreMotion's device motion gives the rotation rate with the gyro's bias
-// already taken out, IOSTOUCH_GYRO_HZ times a second. Turning left and right
-// is measured about the way up (against gravity), so it works the same
-// however far back the phone is tipped ("player space": what the screen's
-// yaw and roll axes turn about up together -- made up by as much as
-// IOSTOUCH_GYRO_YAW_RELAX times for a phone held rolled a little to one
-// side, but never more than the two turn in all). Where up says nothing
-// about which way the player's head is -- the screen facing down at a player
-// lying under it, or rolled over on its side -- it is about the screen's own
-// up axis instead ("local space"). Tilting is about the screen's own
-// side-to-side axis. Under IOSTOUCH_GYRO_SMOOTH deg/s the motion is averaged
-// over the last IOSTOUCH_GYRO_SMOOTH_N samples (all of it under half that),
-// and under IOSTOUCH_GYRO_SOFT deg/s it is scaled down, to nothing at rest,
-// so a phone held still doesn't creep. A gap between two samples longer than
-// IOSTOUCH_GYRO_MAX_DT (a stall) is skipped, and so is what the phone did
-// between two frames more than IOSTOUCH_GYRO_MAX_FRAME apart (the game was
-// stopped: it would come all at once), or in the IOSTOUCH_GYRO_TURN_HOLD
-// after the screen turned round to the other landscape side (the phone is
-// still on its way round). The sensitivity is one of _afGyroSens: at 1.0x
-// the view turns as far as the phone does.
-#define IOSTOUCH_GYRO_HZ 100.0
-#define IOSTOUCH_GYRO_YAW_RELAX 1.41
-#define IOSTOUCH_GYRO_SMOOTH 4.0
-#define IOSTOUCH_GYRO_SMOOTH_N 12 // about 0.125 s
-#define IOSTOUCH_GYRO_SOFT 1.5
-#define IOSTOUCH_GYRO_MAX_DT 0.05
-#define IOSTOUCH_GYRO_MAX_FRAME 0.5
-#define IOSTOUCH_GYRO_TURN_HOLD 0.35
-#define IOSTOUCH_GYRO_DEFAULT_SENS 1 // 1.5x
 // The message line (quick save's...) shows this long unless asked otherwise
 #define IOSTOUCH_MESSAGE_TIME 3.0
-// MAP, RUN: a slide this far is a look, not a tap (the arc passes drags to
-// looking)
+// MAP: a slide this far is no tap
 #define IOSTOUCH_TAP_SLIDE 10.0
+// The cheat (sithewok): CHEAT held IOSTOUCH_CHEAT_HOLD switches it on or
+// off; while it's on, USE held as long goes through walls (noclip) or back.
+// Still: never further than IOSTOUCH_CHEAT_STILL from where it went down.
+#define IOSTOUCH_CHEAT_HOLD 0.5
+#define IOSTOUCH_CHEAT_STILL 10.0
 // The menus: a finger that slides this far is a slide, not a tap (Return);
 // each IOSTOUCH_MENU_STEP it slides one way is a step that way (an arrow
 // key). A tap is lifted within IOSTOUCH_MENU_TAP_TIME. The arrows on the
@@ -155,15 +156,18 @@ enum {
   KIND_HOLD = 0, // holds its game button while touched
   KIND_MENU,     // asks for the menu when the touch lifts on it; held IOSTOUCH_MENU_HOLD, opens its tray
   KIND_TAP,      // asks for its request when the touch lifts on it (MAP: not once it slid)
-  KIND_HOLDSAVE, // asks for a quick save once held IOSTOUCH_QUICKSAVE_HOLD seconds without leaving it
-  KIND_HOLDLOAD, // asks for a quick load once held IOSTOUCH_QUICKLOAD_HOLD seconds without leaving it
+  KIND_HOLDSAVE, // SAVE: a tap, the game's Save Game menu; held IOSTOUCH_QUICKSAVE_HOLD without leaving it, a quick save
+  KIND_HOLDLOAD, // LOAD: a tap, the game's Load Game menu; held IOSTOUCH_QUICKLOAD_HOLD without leaving it, a quick load
   KIND_KEYBOARD, // (MENU's tray) the iOS keyboard up or down, when the touch lifts on it
   KIND_FPS,      // (MENU's tray) shows or hides the FPS readout, when the touch lifts on it (no hold action)
-  KIND_GYRO,     // (MENU's tray) the next tilt aiming mode, when the touch lifts on it
-  KIND_GYROSENS, // (MENU's tray) the next tilt aiming sensitivity, when the touch lifts on it
+  KIND_LOOKSPEED,// (MENU's tray) the next look speed, when the touch lifts on it; held IOSTOUCH_MENU_HOLD, back to 1x
+  KIND_ALWAYSRUN,// (MENU's tray) ECWolf's Always Run on or off, when the touch lifts on it
   KIND_WHEEL,    // NEXT WPN: a tap presses its game button once as it lifts; a slide or a hold opens the weapon wheel
   KIND_OPACITY,  // (MENU's tray) opens or closes its slider under the tray, when the touch lifts on it; held IOSTOUCH_MENU_HOLD, back to 100%
   KIND_KEY,      // (the menus) BACK and the arrows: their key (ulAction: IOSTOUCH_KEY_*) as the touch goes down, again while held
+  KIND_CHEAT,    // CHEAT: held IOSTOUCH_CHEAT_HOLD, the cheat on or off; a tap does nothing
+  KIND_CHEATSWITCH, // (MENU's tray) shows CHEAT and switches the cheat on, or leaves cheat mode, when the touch lifts on it
+  KIND_LEVELPICK,// (MENU's tray, the cheat on) opens the list of levels, when the touch lifts on it
 };
 
 // which modes a button shows in
@@ -183,53 +187,55 @@ typedef struct {
 } IOSTouchButton;
 
 // Layout (see IOSTouch_LayoutButtons). Bottom right, under the right thumb:
-// FIRE and an arc of USE / MAP / RUN around it, IOSTOUCH_CLUSTER_GAP apart.
-// These pass drags through to looking, so a thumb that lands on one while
-// aiming keeps aiming (MAP and RUN, which act as the finger lifts, do
-// nothing once it slid). Top left: NEXT WPN (a tap; slid or held, the weapon
-// wheel). Top right: quick save and quick load (each a short hold) and the
-// menu. Holding MENU opens a tray just under it: tilt aiming's sensitivity
-// and mode (SENS, GYRO), OPACITY, FPS (which shows or hides a frame rate
-// readout by QUICK SAVE) and the keyboard. RESUME, in the middle, only
-// while the game is paused. In the menus: BACK top left, the arrows on the
-// right, MENU (and its tray).
+// FIRE, with USE beside it; both pass drags through to looking, so a thumb
+// that lands on one while aiming keeps aiming. Top left: NEXT WPN (a tap;
+// slid or held, the weapon wheel) and MAP. Top right: SAVE and LOAD (a tap,
+// the game's menu; held, the quick one) and the menu. CHEAT (while cheat
+// mode is on) between the top row's middle -- kept free for a camera button
+// -- and SAVE. Holding MENU opens a tray just under it: LOOK (the look
+// speed), ALWAYS RUN, OPACITY, FPS (which shows or hides a frame rate
+// readout by SAVE), CHEAT, LEVEL (while the cheat is on, in a level) and
+// the keyboard. RESUME, in the middle, only while the game is paused. In
+// the menus: BACK top left, the arrows on the right, MENU (and its tray).
 enum {
-  BTN_FIRE, BTN_USE, BTN_MAP, BTN_RUN,
-  BTN_NEXTWPN,
+  BTN_FIRE, BTN_USE,
+  BTN_NEXTWPN, BTN_MAP,
+  BTN_CHEAT,
   BTN_QUICKSAVE, BTN_QUICKLOAD, BTN_MENU,
   BTN_RESUME,
   BTN_BACK, BTN_MENUUP, BTN_MENUDOWN,
-  BTN_TRAYSENS, BTN_TRAYGYRO, BTN_TRAYOPACITY, BTN_TRAYFPS, BTN_TRAYKEYS, // MENU's tray (left to right), hidden unless it is open
+  BTN_TRAYLOOK, BTN_TRAYRUN, BTN_TRAYOPACITY, BTN_TRAYFPS, BTN_TRAYCHEAT, BTN_TRAYLEVEL, BTN_TRAYKEYS, // MENU's tray (left to right), hidden unless it is open (LEVEL only while the cheat is on, in a level)
   BTN_COUNT
 };
 static IOSTouchButton _aButtons[] = {
   [BTN_FIRE]      = { "FIRE",        KIND_HOLD,     IOSTOUCH_FIRE,          42.0, 1, SHOW_PLAY },
   [BTN_USE]       = { "USE",         KIND_HOLD,     IOSTOUCH_USE,           31.0, 1, SHOW_PLAY },
-  [BTN_MAP]       = { "MAP",         KIND_TAP,      IOSTOUCH_REQ_MAP,       29.0, 1, SHOW_PLAY },
-  [BTN_RUN]       = { "RUN",         KIND_TAP,      IOSTOUCH_REQ_RUN,       29.0, 1, SHOW_PLAY },
   [BTN_NEXTWPN]   = { "NEXT\nWPN",   KIND_WHEEL,    IOSTOUCH_NEXTWEAPON,    22.0, 0, SHOW_PLAY },
-  [BTN_QUICKSAVE] = { "QUICK\nSAVE", KIND_HOLDSAVE, IOSTOUCH_REQ_QUICKSAVE, 22.0, 0, SHOW_PLAY },
-  [BTN_QUICKLOAD] = { "QUICK\nLOAD", KIND_HOLDLOAD, IOSTOUCH_REQ_QUICKLOAD, 22.0, 0, SHOW_PLAY },
+  [BTN_MAP]       = { "MAP",         KIND_TAP,      IOSTOUCH_REQ_MAP,       22.0, 0, SHOW_PLAY },
+  [BTN_CHEAT]     = { "",            KIND_CHEAT,    0,                      22.0, 0, SHOW_PLAY },
+  [BTN_QUICKSAVE] = { "SAVE",        KIND_HOLDSAVE, IOSTOUCH_REQ_QUICKSAVE, 22.0, 0, SHOW_PLAY },
+  [BTN_QUICKLOAD] = { "LOAD",        KIND_HOLDLOAD, IOSTOUCH_REQ_QUICKLOAD, 22.0, 0, SHOW_PLAY },
   [BTN_MENU]      = { "MENU",        KIND_MENU,     IOSTOUCH_REQ_MENU,      22.0, 0, SHOW_ALL },
   [BTN_RESUME]    = { "RESUME",      KIND_TAP,      IOSTOUCH_REQ_RESUME,    44.0, 0, SHOW_PAUSE },
   [BTN_BACK]      = { "BACK",        KIND_KEY,      IOSTOUCH_KEY_ESCAPE,    24.0, 0, SHOW_MENU },
   [BTN_MENUUP]    = { "\u25B2",      KIND_KEY,      IOSTOUCH_KEY_UP,        28.0, 0, SHOW_MENU },
   [BTN_MENUDOWN]  = { "\u25BC",      KIND_KEY,      IOSTOUCH_KEY_DOWN,      28.0, 0, SHOW_MENU },
-  [BTN_TRAYSENS]  = { "SENS",        KIND_GYROSENS, 0,                      20.0, 0, SHOW_ALL },
-  [BTN_TRAYGYRO]  = { "GYRO",        KIND_GYRO,     0,                      20.0, 0, SHOW_ALL },
+  [BTN_TRAYLOOK]  = { "LOOK",        KIND_LOOKSPEED, 0,                     20.0, 0, SHOW_ALL },
+  [BTN_TRAYRUN]   = { "ALWAYS\nRUN", KIND_ALWAYSRUN, IOSTOUCH_REQ_RUN,      20.0, 0, SHOW_ALL },
   [BTN_TRAYOPACITY] = { "OPACITY",   KIND_OPACITY,  0,                      20.0, 0, SHOW_ALL },
   [BTN_TRAYFPS]   = { "FPS",         KIND_FPS,      0,                      20.0, 0, SHOW_ALL },
+  [BTN_TRAYCHEAT] = { "CHEAT",       KIND_CHEATSWITCH, 0,                   20.0, 0, SHOW_ALL },
+  [BTN_TRAYLEVEL] = { "LEVEL",       KIND_LEVELPICK, 0,                     20.0, 0, SHOW_PLAY },
   [BTN_TRAYKEYS]  = { "",            KIND_KEYBOARD, IOSTOUCH_REQ_KEYBOARD,  20.0, 0, SHOW_ALL },
 };
 #define IOSTOUCH_NUM_BUTTONS ((int)(sizeof(_aButtons) / sizeof(_aButtons[0])))
 typedef char IOSTouch_assertButtonCount[(IOSTOUCH_NUM_BUTTONS == BTN_COUNT) ? 1 : -1];
-#define BTN_TRAYFIRST BTN_TRAYSENS
+#define BTN_TRAYFIRST BTN_TRAYLOOK
 #define BTN_TRAYLAST BTN_TRAYKEYS
 
 // ------------------------------------------------------- shared with the game
 // The game reads these (IOSTouch_ReadInput once a tic, IOSTouch_TakeLook
-// and IOSTouch_TakeGyro once a frame; ECWolf's main thread, as the
-// overlay's): kept under _lock all the same, as in the owner's other ports.
+// once a frame; ECWolf's main thread, as the overlay's): kept under _lock all the same, as in the owner's other ports.
 
 static os_unfair_lock _lock = OS_UNFAIR_LOCK_INIT;
 static int _bReading = 0;         // gameplay controls are showing; otherwise the game gets nothing
@@ -240,8 +246,8 @@ static unsigned char _aPulseQueue[IOSTOUCH_NUMBUTTONS];
 static unsigned char _aPulseReads[IOSTOUCH_NUMBUTTONS];
 static unsigned char _aPulseGap[IOSTOUCH_NUMBUTTONS];
 static float _fMoveX = 0.0f, _fMoveY = 0.0f;
+static int _bMoveRun = 0; // the stick's thumb on its run marker
 static float _fLookX = 0.0f, _fLookY = 0.0f;
-static float _fGyroYaw = 0.0f, _fGyroPitch = 0.0f; // tilt aiming: degrees for the view to turn (+ left) and tilt (+ up)
 // The weapon wheel's pick (a weapon number) waiting to be read, and the one
 // being read now: reads left, its value, and the read after it with none
 // (weapon numbers + 1 here, 0 being none: the list's first weapon is 0)
@@ -273,8 +279,8 @@ static void IOSTouch_ResetShared(int bReading)
   memset(_aPulseReads, 0, sizeof(_aPulseReads));
   memset(_aPulseGap, 0, sizeof(_aPulseGap));
   _fMoveX = _fMoveY = 0.0f;
+  _bMoveRun = 0;
   _fLookX = _fLookY = 0.0f;
-  _fGyroYaw = _fGyroPitch = 0.0f;
   _iPickPending = _iPickReads = _iPickNow = _bPickGap = 0;
   os_unfair_lock_unlock(&_lock);
 }
@@ -291,8 +297,8 @@ static void IOSTouch_QueuePick(int iWeapon)
 
 // The weapon wheel opened: a NEXT/PREV tap the game hasn't started reading
 // (a slow frame) would go off after the wheel closes and undo its pick, so it
-// is dropped (one already being read finishes); look and tilt aiming taken
-// before the opening are dropped too, so nothing jumps once the game goes on
+// is dropped (one already being read finishes); look taken before the
+// opening is dropped too, so nothing jumps once the game goes on
 static void IOSTouch_SharedWheelOpened(void)
 {
   os_unfair_lock_lock(&_lock);
@@ -300,7 +306,6 @@ static void IOSTouch_SharedWheelOpened(void)
     if ((1u << i) & IOSTOUCH_NEXTWEAPON) _aPulseQueue[i] = 0;
   }
   _fLookX = _fLookY = 0.0f;
-  _fGyroYaw = _fGyroPitch = 0.0f;
   os_unfair_lock_unlock(&_lock);
 }
 
@@ -410,14 +415,24 @@ static void IOSTouch_WheelGeometry(double W, double H, double inLeft, double inT
 }
 
 // MENU's tray along its row (IOSTouch_LayoutButtons found where): the
-// keyboard under MENU, then FPS, OPACITY, GYRO and SENS to the left,
-// IOSTOUCH_TRAY_STEP apart
-static void IOSTouch_PlaceTray(void)
+// keyboard under MENU, then LEVEL (if it shows: bLevel), CHEAT, FPS,
+// OPACITY, ALWAYS RUN and LOOK to the left, IOSTOUCH_TRAY_STEP apart.
+// LEVEL hidden sits under CHEAT (nothing finds a hidden button).
+static int _bTrayLevelPlaced = 0;
+static void IOSTouch_PlaceTray(int bLevel)
 {
-  for (int i = BTN_TRAYLAST, ctLeft = 0; i >= BTN_TRAYFIRST; i--, ctLeft++) {
+  int ctLeft = 0;
+  for (int i = BTN_TRAYLAST; i >= BTN_TRAYFIRST; i--) {
+    if (i == BTN_TRAYLEVEL && !bLevel) {
+      _aButtons[i].x = _fTrayKeysX - (ctLeft + 1) * IOSTOUCH_TRAY_STEP;
+      _aButtons[i].y = _fTrayY;
+      continue;
+    }
     _aButtons[i].x = _fTrayKeysX - ctLeft * IOSTOUCH_TRAY_STEP;
     _aButtons[i].y = _fTrayY;
+    ctLeft++;
   }
+  _bTrayLevelPlaced = bLevel != 0;
   _rTrayBack.bValid = 1;
   _rTrayBack.x0 = _aButtons[BTN_TRAYFIRST].x - 26;
   _rTrayBack.y0 = _fTrayY - 26;
@@ -426,6 +441,10 @@ static void IOSTouch_PlaceTray(void)
   _rTrayKeysBack = _rTrayBack;
   _rTrayKeysBack.x0 = _fTrayKeysX - IOSTOUCH_TRAY_STEP - 26;
 }
+
+// The screen's usable edges (points), as the last layout had them: the run
+// marker keeps inside them
+static double _fSafeLeft = 8.0, _fSafeTop = 8.0, _fSafeRight = 8.0;
 
 // Places every button on a W x H point screen with these safe-area insets,
 // keeping clear of the HUD's score and high score boxes and unread messages
@@ -449,56 +468,57 @@ static void IOSTouch_LayoutButtons(double W, double H, double inLeft, double inT
   _aButtons[BTN_FIRE].x = fireX;
   _aButtons[BTN_FIRE].y = fireY;
 
-  // USE, MAP and RUN on an arc around FIRE (angles counter-clockwise from
-  // pointing right, so 90 is straight up), 45 degrees apart -- which at this
-  // radius leaves about IOSTOUCH_CLUSTER_GAP between them (UZDoom's USE /
-  // MAP / JUMP places)
-  const double arc = 115.0;
-  const int aArcBtn[3] = { BTN_USE, BTN_MAP, BTN_RUN };
-  const double aArcDeg[3] = { 180.0, 135.0, 90.0 };
-  for (int i = 0; i < 3; i++) {
-    const double rad = aArcDeg[i] * M_PI / 180.0;
-    _aButtons[aArcBtn[i]].x = fireX + arc * cos(rad);
-    _aButtons[aArcBtn[i]].y = fireY - arc * sin(rad);
+  // USE beside FIRE, on the arc UZDoom's USE / MAP / JUMP sat on (angles
+  // counter-clockwise from pointing right: straight left)
+  {
+    const double arc = 115.0, rad = 180.0 * M_PI / 180.0;
+    _aButtons[BTN_USE].x = fireX + arc * cos(rad);
+    _aButtons[BTN_USE].y = fireY - arc * sin(rad);
   }
 
   (void)bCutoutMayBeRight; (void)FR; // (nothing sits by the right edge's cutout here)
+  _fSafeLeft = left;
+  _fSafeTop = top;
+  _fSafeRight = right;
 
-  // Top left: NEXT WPN (in the menus, BACK), below the score box
+  // Top left: NEXT WPN, then MAP (in the menus, BACK), below the score box
   double topLeftY = top + 26;
   if (prScore->bValid) topLeftY = fmax(topLeftY, prScore->y1 + 4 + _aButtons[BTN_NEXTWPN].radius);
   _aButtons[BTN_NEXTWPN].x = left + 24;
   _aButtons[BTN_NEXTWPN].y = topLeftY;
+  _aButtons[BTN_MAP].x = left + 24 + 66;
+  _aButtons[BTN_MAP].y = topLeftY;
   _aButtons[BTN_BACK].x = left + 26;
   _aButtons[BTN_BACK].y = top + 28;
   // The menus' arrows, one above the other on the right, by the middle
   _aButtons[BTN_MENUUP].x = _aButtons[BTN_MENUDOWN].x = right - 40;
   _aButtons[BTN_MENUUP].y = (top + bottom) * 0.5 - 38;
   _aButtons[BTN_MENUDOWN].y = (top + bottom) * 0.5 + 38;
-  // Top right: QUICK SAVE, QUICK LOAD, MENU in the corner -- spaced well
-  // apart, so a press meant for one of the two quick holds can't land on the
-  // other
+  // Top right: SAVE, LOAD, MENU in the corner -- spaced well apart, so a
+  // press meant for one of the two quick holds can't land on the other
   _aButtons[BTN_QUICKSAVE].x = right - 156;
   _aButtons[BTN_QUICKLOAD].x = right - 90;
   _aButtons[BTN_MENU].x = right - 24;
   _aButtons[BTN_QUICKSAVE].y = _aButtons[BTN_QUICKLOAD].y = _aButtons[BTN_MENU].y = top + 26;
+  // CHEAT half way between the top row's middle (kept free for a camera
+  // button) and SAVE
+  _aButtons[BTN_CHEAT].x = round(((left + right) * 0.5 + _aButtons[BTN_QUICKSAVE].x) * 0.5);
+  _aButtons[BTN_CHEAT].y = top + 26;
 
   // MENU's tray: a row just under the corner, the keyboard right below MENU
   // (a held thumb slides straight down onto it), then the rest to the left,
-  // IOSTOUCH_TRAY_STEP apart (IOSTouch_PlaceTray). Where RUN or MAP sits
-  // high in that corner (a smaller screen) the row moves left until it is
-  // clear of them -- or, if that never happens, to wherever it is furthest
-  // from them. (While open, the tray is on top and takes its own touches, but
-  // a touch meant for it mustn't land nearer one of those.)
+  // IOSTOUCH_TRAY_STEP apart (IOSTouch_PlaceTray). Where USE sits high in
+  // that corner (a small screen) the row moves left until it is clear of it
+  // -- or, if that never happens, to wherever it is furthest from it.
   {
     const IOSTouchButton *m = &_aButtons[BTN_MENU];
-    const int aAvoid[2] = { BTN_RUN, BTN_MAP };
+    const int aAvoid[1] = { BTN_USE };
     const double ty = m->y + 52;
-    const double row = (BTN_TRAYLAST - BTN_TRAYFIRST) * IOSTOUCH_TRAY_STEP; // SENS to the keyboard
+    const double row = (BTN_TRAYLAST - BTN_TRAYFIRST) * IOSTOUCH_TRAY_STEP; // LOOK to the keyboard, LEVEL too
     double kx = m->x, bestGap = -1e9;
     for (double x = m->x; x >= m->x - 240; x -= 4) {
       double gap = 1e9;
-      for (int i = 0; i < 2; i++) {
+      for (int i = 0; i < 1; i++) {
         const IOSTouchButton *f = &_aButtons[aAvoid[i]];
         gap = fmin(gap, IOSTouch_DistToSegment(f->x, f->y, x - row, ty, x, ty) - 26 - f->radius);
       }
@@ -512,30 +532,24 @@ static void IOSTouch_LayoutButtons(double W, double H, double inLeft, double inT
     _fTrayY = ty;
     _fTrayLeft = left;
     _fTrayRight = right;
-    IOSTouch_PlaceTray();
+    IOSTouch_PlaceTray(_bTrayLevelPlaced);
   }
 
-  // The FPS readout left of QUICK SAVE. Where that spot is on one of the
-  // HUD's boxes, it moves right towards QUICK SAVE; if it never fits there,
-  // it goes below QUICK SAVE (and on to the left), clear of RUN and MENU's
-  // tray's FPS and keyboard as well. (Where the rest of the open tray lies
+  // The FPS readout under SAVE and LOAD, clear of the corner (as in the
+  // Half-Life port: left of SAVE is CHEAT's place, and the camera's). Where
+  // that spot is on one of the HUD's boxes it moves on to the left, clear of
+  // USE and MENU's tray's FPS and keyboard as well. (Where the rest of the open tray lies
   // over it, it hides while the tray is open: IOSTouch_FpsUnderTray.)
   {
     const IOSTouchButton *q = &_aButtons[BTN_QUICKSAVE];
     const IOSTouchRect *const apr[4] = { prScore, prHiScore, prMessages, &_rTrayKeysBack };
-    const int aAvoid[1] = { BTN_RUN };
+    const int aAvoid[1] = { BTN_USE };
     const double hw = IOSTOUCH_FPS_W * 0.5, hh = IOSTOUCH_FPS_H * 0.5;
     const double y2 = q->y + q->radius + 8 + hh;
     int bFound = 0;
-    _fFpsX = right - 216;
-    _fFpsY = top + 26;
-    for (double x = right - 216; x <= q->x - q->radius - 6 - hw && !bFound; x += 2) {
-      if (IOSTouch_BoxIsClear(x, top + 26, hw, hh, apr, 3, NULL, 0)) {
-        _fFpsX = x;
-        bFound = 1;
-      }
-    }
-    for (double x = q->x; x >= left + hw && !bFound; x -= 4) {
+    _fFpsX = (q->x + _aButtons[BTN_QUICKLOAD].x) * 0.5;
+    _fFpsY = y2;
+    for (double x = _fFpsX; x >= left + hw && !bFound; x -= 4) {
       if (IOSTouch_BoxIsClear(x, y2, hw, hh, apr, 4, aAvoid, 1)) {
         _fFpsX = x;
         _fFpsY = y2;
@@ -619,11 +633,12 @@ typedef struct {
   int button;
   double x, y;          // where it is now
   double tDown;         // when it began
-  int bFired;           // QUICK SAVE, QUICK LOAD: the hold is over (a save or load was asked for, by this finger or
-                        // another one on either button, or it slid off). MENU: the hold is over (tray opened, or
-                        // slid off). MAP, RUN: it slid (a look), so its lift does nothing. The tray's OPACITY:
-                        // held (back to 100%); FPS: slid off. The menus: it slid (no tap). BACK, the arrows: when the key
-                        // goes again (tRepeat)
+  int bFired;           // SAVE, LOAD: the hold is over (a save or load was asked for, by this finger or another
+                        // one on either button, or it slid off), so its lift is no tap. MENU: the hold is over (tray
+                        // opened, or slid off). MAP: it slid, so its lift does nothing. The tray's OPACITY and LOOK:
+                        // held (back to the default); FPS: slid off. The menus: it slid (no tap). BACK, the arrows:
+                        // when the key goes again (tRepeat)
+  int bCheatDone;       // CHEAT's hold, or USE's (the cheat's noclip), is over (done, slid, or nothing to do)
   int trayButton;       // MENU, after its tray opened: the tray button under the finger, or -1
   // Where it went down (NEXT WPN, PREV WPN: a slide's distance and aim are measured from there; MAP's slide too)
   double xDown, yDown;
@@ -686,6 +701,29 @@ static float IOSTouch_OpacityStep(float k)
 }
 
 static float _fFpsRing = 0.0f;
+// The look speed (a step of _afLookSteps, or what the app's settings had),
+// LOOK's hold's ring, and the times it was held back to 1x (a haptic thump
+// each)
+static float _fLookScale = 1.0f;
+static float _fLookRing = 0.0f;
+static int _ctLookResets = 0;
+// The stick's run marker: whether it has one this time, where (its centre)
+// and which way that is from the stick's centre (degrees, counter-clockwise
+// from pointing right); whether the thumb is on it, and the times it went
+// on (a haptic tick each)
+static int _bRunMarker = 0;
+static double _fRunX = 0.0, _fRunY = 0.0, _fRunDeg = 90.0;
+static int _bStickRunning = 0;
+static int _ctRunTicks = 0;
+// The cheat (sithewok): its button showing (kept in the app's settings); on
+// (never kept: off each time the app opens); through walls. CHEAT's and
+// USE's hold rings, the haptic taps owed, the list of levels open, the one
+// tapped (1..), the level the noclip was for
+static int _bShowCheat = 0, _bCheatOn = 0, _bNoclip = 0;
+static float _fCheatRing = 0.0f, _fNoclipRing = 0.0f;
+static int _ctCheatTicks = 0;
+static int _bLevelListOpen = 0, _iLevelPicked = 0;
+static unsigned int _uWorldSeen = 0;
 static int _ctMaxFpsChanges = 0;
 // The keys waiting for the menus (IOSTouch_TakeMenuKey), oldest first
 static int _aiMenuKeys[IOSTOUCH_MENU_KEYS];
@@ -694,7 +732,7 @@ static int _ctMenuKeys = 0;
 static char _strCamMessage[192] = "";
 static double _tCamMessage = -1.0e9;
 static double _fCamMessageTime = IOSTOUCH_MESSAGE_TIME; // how long it shows
-// how far QUICK SAVE's, QUICK LOAD's and MENU's hold rings have filled
+// how far SAVE's, LOAD's and MENU's hold rings have filled
 static float _fSaveRing = 0.0f, _fLoadRing = 0.0f, _fMenuRing = 0.0f;
 static double _tLastTick = 0.0;            // when IOSTouch_TickHolds last ran (0: not since the last reset)
 // The FPS readout: frames counted since _ulFpsFrames at _tFpsBase, and the
@@ -703,51 +741,11 @@ static int _bFpsBase = 0;
 static unsigned int _ulFpsFrames = 0;
 static double _tFpsBase = 0.0;
 static int _iFpsShown = -1;
-// Tilt aiming: its mode and sensitivity (an index into _afGyroSens; the view
-// keeps both in the app's settings), whether the device has device motion
-// (the view sets it) and whether iOS refused it; whether the motion updates
-// are running, whether the last frame could have aimed (and when it was);
-// the landscape side the screen was last turned and when it turned round to
-// it. Under _gyroLock, as the samples come in on the motion queue: which way
-// round the screen is (+1 landscape left, -1 landscape right, 0 neither, so
-// no aiming), how far the view is to turn (degrees, + left) and tilt (+ up)
-// for the samples since the last frame, what the samples keep (the last
-// one's time, the smoothing's), and whether one came back refused.
-enum { IOSTOUCH_GYRO_OFF = 0, IOSTOUCH_GYRO_TOUCH, IOSTOUCH_GYRO_ALWAYS, IOSTOUCH_GYRO_NUM_MODES };
-static const float _afGyroSens[] = { 1.0f, 1.5f, 2.0f, 3.0f };
-#define IOSTOUCH_GYRO_NUM_SENS ((int)(sizeof(_afGyroSens) / sizeof(_afGyroSens[0])))
-static int _iGyroMode = IOSTOUCH_GYRO_OFF; // until it is switched on in MENU's tray
-static int _iGyroSens = IOSTOUCH_GYRO_DEFAULT_SENS;
-static int _bGyroAvailable = 0;
-static int _bGyroRefused = 0;
-static int _bGyroRunning = 0;
-static int _bGyroWasOk = 0;
-static double _tGyroLastFrame = 0.0;
-static int _iGyroLastSide = 0;
-static double _tGyroTurnedRound = -1.0e9;
-static os_unfair_lock _gyroLock = OS_UNFAIR_LOCK_INIT;
-static int _iGyroSide = 0;
-static double _fGyroQueueYaw = 0.0, _fGyroQueuePitch = 0.0;
-static double _tGyroLastSample = 0.0;
-static double _afGyroSmooth[IOSTOUCH_GYRO_SMOOTH_N][2];
-static int _iGyroSmoothNext = 0;
-static int _bGyroRefusedOnQueue = 0;
-
-// Whether this device has what tilt aiming needs (not the Simulator), and
-// iOS hasn't refused it
-static int IOSTouch_GyroAvailable(void)
+// Whether the tray's LEVEL is in the tray: the cheat on, in a level of a
+// game that allows it, with levels to list
+static int IOSTouch_LevelPickShows(void)
 {
-  return _bGyroAvailable && !_bGyroRefused;
-}
-
-// The next mode or sensitivity (MENU's tray's GYRO and SENS)
-static void IOSTouch_GyroNextMode(void)
-{
-  _iGyroMode = (_iGyroMode + 1) % IOSTOUCH_GYRO_NUM_MODES;
-}
-static void IOSTouch_GyroNextSens(void)
-{
-  _iGyroSens = (_iGyroSens + 1) % IOSTOUCH_GYRO_NUM_SENS;
+  return _bCheatOn && _hud.bCheatAllowed && _hud.ctLevels > 0 && _iMode == IOSTOUCH_GAMEPLAY;
 }
 
 // Whether a button shows now
@@ -755,6 +753,8 @@ static int IOSTouch_IsShown(int button)
 {
   if (!(_aButtons[button].iShowIn & (1 << _iMode))) return 0;
   if (button == BTN_QUICKSAVE || button == BTN_QUICKLOAD) return !_hud.bNoSaves;
+  if (button == BTN_CHEAT) return _bShowCheat;
+  if (button == BTN_TRAYLEVEL) return _bTrayOpen && IOSTouch_LevelPickShows();
   if (button >= BTN_TRAYFIRST && button <= BTN_TRAYLAST) return _bTrayOpen;
   return 1;
 }
@@ -817,7 +817,7 @@ static int IOSTouch_IsTrayButton(int button)
   return button >= BTN_TRAYFIRST && button <= BTN_TRAYLAST;
 }
 
-// QUICK SAVE and QUICK LOAD: the holds that end for good when the finger leaves the button
+// SAVE and LOAD: the holds that end for good when the finger leaves the button
 static int IOSTouch_IsQuickHold(int button)
 {
   return button == BTN_QUICKSAVE || button == BTN_QUICKLOAD;
@@ -833,11 +833,16 @@ static IOSTouchSlot *IOSTouch_FindSlot(const void *touch)
 
 // The stick as movement: nothing inside the dead zone, full speed from
 // IOSTOUCH_STICK_FULL of the radius out, in the direction it is pushed
+// -- or, on the run marker, straight ahead, running
 static void IOSTouch_SetMoveFromStick(void)
 {
   float fX = 0.0f, fY = 0.0f;
   const float fLen = sqrtf(_fStickX * _fStickX + _fStickY * _fStickY);
-  if (_bStickActive && fLen > IOSTOUCH_STICK_DEADZONE) {
+  const int bRun = _bStickActive && _bStickRunning;
+  if (bRun) {
+    fY = 1.0f;
+  }
+  else if (_bStickActive && fLen > IOSTOUCH_STICK_DEADZONE) {
     float fSpeed = (fLen - IOSTOUCH_STICK_DEADZONE) / (IOSTOUCH_STICK_FULL - IOSTOUCH_STICK_DEADZONE);
     if (fSpeed > 1.0f) fSpeed = 1.0f;
     fX = _fStickX / fLen * fSpeed;
@@ -846,7 +851,58 @@ static void IOSTouch_SetMoveFromStick(void)
   os_unfair_lock_lock(&_lock);
   _fMoveX = fX;
   _fMoveY = fY;
+  _bMoveRun = bRun;
   os_unfair_lock_unlock(&_lock);
+}
+
+static double IOSTouch_AngleDiff(double a, double b);
+
+// Puts the run marker in place for a stick centred on (ox,oy) -- if Always
+// Run is off. It goes IOSTOUCH_RUN_DIST straight above the centre or, where
+// the top of the screen or a button (the top row) is in the way, as near
+// that as it fits, 4pt clear of them: no nearer the centre than
+// IOSTOUCH_RUN_MIN_DIST, else there is no marker this time. Its edge also
+// keeps 4pt inside the safe area's sides (the camera cutout may be there),
+// so for a thumb down that far left it is a little right of straight above.
+static void IOSTouch_PlaceRunMarker(double ox, double oy)
+{
+  const double R = IOSTOUCH_RUN_R;
+  _bRunMarker = 0;
+  _bStickRunning = 0;
+  _fRunDeg = 90.0;
+  if (_hud.bRunOn) return;
+  double x = fmax(ox, _fSafeLeft + 4.0 + R);
+  x = fmin(x, _fSafeRight - 4.0 - R);
+  const double minY = _fSafeTop + 4.0 + R;
+  for (double h = IOSTOUCH_RUN_DIST; h >= IOSTOUCH_RUN_MIN_DIST; h -= 2.0) {
+    const double cy = oy - h;
+    if (cy < minY) continue;
+    int bClear = 1;
+    for (int i = 0; i < IOSTOUCH_NUM_BUTTONS && bClear; i++) {
+      const IOSTouchButton *b = &_aButtons[i];
+      if (!IOSTouch_IsShown(i)) continue;
+      bClear = hypot(x - b->x, cy - b->y) >= b->radius + R + 4.0;
+    }
+    if (!bClear) continue;
+    _bRunMarker = 1;
+    _fRunX = x;
+    _fRunY = cy;
+    _fRunDeg = atan2(h, x - ox) * 180.0 / M_PI;
+    return;
+  }
+}
+
+// Whether the stick's thumb at (x,y) is on its run marker: pushed up to it
+// past the ring, pointing its way. Once on, it stays on a little further back
+// and further round.
+static int IOSTouch_StickOnRunMarker(double x, double y)
+{
+  if (!_bRunMarker || _hud.bRunOn) return 0;
+  const double dx = x - _fStickOriginX, dy = _fStickOriginY - y;
+  const double d = hypot(dx, dy);
+  if (d < (_bStickRunning ? IOSTOUCH_RUN_OFF : IOSTOUCH_RUN_ON)) return 0;
+  const double off = fabs(IOSTouch_AngleDiff(atan2(dy, dx) * 180.0 / M_PI, _fRunDeg));
+  return off <= (_bStickRunning ? IOSTOUCH_RUN_CONE_OFF : IOSTOUCH_RUN_CONE);
 }
 
 // The game buttons the touches on KIND_HOLD buttons hold down
@@ -916,27 +972,298 @@ int IOSTouch_TakeMenuKey(void)
   return iKey;
 }
 
+// The next look speed up from the one now, round to the first (from one
+// the app's settings had between two steps: the next step above it)
+static void IOSTouch_LookNextStep(void)
+{
+  float next = _afLookSteps[0];
+  for (int k = 0; k < IOSTOUCH_LOOK_NUM_STEPS; k++) {
+    if (_afLookSteps[k] > _fLookScale + 0.01f) {
+      next = _afLookSteps[k];
+      break;
+    }
+  }
+  _fLookScale = next;
+}
+
+static void IOSTouch_UseCheatSwitch(void);
+static void IOSTouch_OpenLevelList(void);
+
 // A tray button picked: it does its thing, and the tray closes -- except
-// after GYRO, SENS and OPACITY, which stay (another tap goes on to the next;
-// OPACITY's slider opens under it) (with no gyro, GYRO and SENS do nothing)
+// after LOOK and OPACITY, which stay (another tap goes on to the next;
+// OPACITY's slider opens under it)
 static void IOSTouch_UseTrayButton(int button)
 {
   const int kind = _aButtons[button].kind;
-  if (kind == KIND_KEYBOARD) {
-    _iRequests |= _aButtons[button].ulAction; // the iOS keyboard
+  if (kind == KIND_KEYBOARD || kind == KIND_ALWAYSRUN) {
+    _iRequests |= _aButtons[button].ulAction; // the iOS keyboard; Always Run on or off
   }
   else if (kind == KIND_OPACITY) {
     _bOpacityOpen = !_bOpacityOpen; // its slider (the tray stays)
     return;
   }
+  else if (kind == KIND_LOOKSPEED) {
+    IOSTouch_LookNextStep(); // (the tray stays)
+    return;
+  }
   else if (kind == KIND_FPS) {
     IOSTouch_SetShowFps(!_bShowFps);
   }
-  else if ((kind == KIND_GYRO || kind == KIND_GYROSENS) && IOSTouch_GyroAvailable()) {
-    if (kind == KIND_GYRO) IOSTouch_GyroNextMode();
-    else IOSTouch_GyroNextSens();
+  else if (kind == KIND_CHEATSWITCH) {
+    IOSTouch_UseCheatSwitch();
   }
-  if (kind != KIND_GYRO && kind != KIND_GYROSENS) IOSTouch_SetTrayOpen(0);
+  else if (kind == KIND_LEVELPICK) {
+    IOSTouch_OpenLevelList(); // (which closes the tray)
+    return;
+  }
+  IOSTouch_SetTrayOpen(0);
+}
+
+// Lets go of every finger down (each is ignored until it lifts): what they
+// held, the stick
+static void IOSTouch_DropTouches(void)
+{
+  for (int i = 0; i < IOSTOUCH_MAX_TOUCHES; i++) {
+    IOSTouchSlot *s = &_aSlots[i];
+    if (s->touch) s->role = ROLE_IGNORED;
+  }
+  memset(_aButtonHeld, 0, sizeof(_aButtonHeld));
+  _bStickActive = 0;
+  _bStickRunning = 0;
+  _fStickX = _fStickY = 0.0f;
+  IOSTouch_SetMoveFromStick();
+  IOSTouch_SetHeld(0, 0);
+}
+
+// ---------------------------------------------------------------- the cheat
+// sithewok: while it's on, the game (IOSGame.cpp) keeps the player from
+// harm (god mode), gives every weapon and key, keeps the ammo full, and goes
+// through walls while _bNoclip is on. CHEAT on the top row: held, on or off
+// (grey); the tray's CHEAT: shows it and switches the cheat on (with a sound
+// of the game's), or leaves cheat mode (off, CHEAT gone); the word typed: on
+// (CHEAT shows), or off (CHEAT goes). While it's on, USE held still: through
+// walls or back; the tray's LEVEL: the list of the game's levels, to tap
+// one (the view's level panel). Off each time the app starts.
+
+static void IOSTouch_CheatNotAllowed(void)
+{
+  IOSTouch_Message("No cheating in a network game");
+}
+
+static void IOSTouch_SetCheat(int bOn)
+{
+  const int bWas = _bCheatOn;
+  _bCheatOn = bOn != 0;
+  if (!_bCheatOn) {
+    // (what it gave is kept)
+    _bNoclip = 0;
+    _bLevelListOpen = 0;
+  }
+  else if (!bWas) {
+    _iRequests |= IOSTOUCH_REQ_CHEATSOUND; // (on, never off: silent)
+  }
+}
+
+// CHEAT held: on (gold) or off (grey); CHEAT stays
+static void IOSTouch_ToggleCheat(void)
+{
+  if (!_bCheatOn && !_hud.bCheatAllowed) {
+    IOSTouch_CheatNotAllowed();
+    return;
+  }
+  IOSTouch_SetCheat(!_bCheatOn);
+  IOSTouch_Message(_bCheatOn ? "Cheat on" : "Cheat off");
+  _ctCheatTicks++;
+}
+
+// The tray's CHEAT: CHEAT shows and the cheat comes on, or cheat mode ends
+static void IOSTouch_UseCheatSwitch(void)
+{
+  if (_bShowCheat) {
+    if (_bCheatOn) IOSTouch_Message("Cheat off");
+    _bShowCheat = 0;
+    IOSTouch_SetCheat(0);
+    return;
+  }
+  _bShowCheat = 1;
+  if (!_hud.bCheatAllowed) {
+    IOSTouch_CheatNotAllowed();
+    return;
+  }
+  if (!_bCheatOn) {
+    IOSTouch_SetCheat(1);
+    IOSTouch_Message("Cheat on");
+  }
+}
+
+void IOSTouch_CheatTyped(void)
+{
+  if (_bCheatOn) {
+    IOSTouch_SetCheat(0);
+    _bShowCheat = 0;
+    IOSTouch_Message("Cheat off");
+    return;
+  }
+  if (!_hud.bCheatAllowed) {
+    IOSTouch_CheatNotAllowed();
+    return;
+  }
+  IOSTouch_SetCheat(1);
+  _bShowCheat = 1;
+  IOSTouch_Message("Cheat on");
+}
+
+int IOSTouch_CheatOn(void)
+{
+  return _bCheatOn && _hud.bCheatAllowed;
+}
+
+int IOSTouch_CheatNoclip(void)
+{
+  return IOSTouch_CheatOn() && _bNoclip;
+}
+
+int IOSTouch_TakeLevelPick(void)
+{
+  const int i = _iLevelPicked;
+  _iLevelPicked = 0;
+  return i;
+}
+
+// Whether USE's hold and the tray's LEVEL do the cheat's things now
+static int IOSTouch_WheelIsOpen(void);
+static int IOSTouch_CheatCanAct(void)
+{
+  return IOSTouch_CheatOn() && _iMode == IOSTOUCH_GAMEPLAY && !IOSTouch_WheelIsOpen();
+}
+
+// The tray's LEVEL: the list of the game's levels opens over the game, which
+// holds still while it's open (IOSTouch_HoldsGame); the tray closes, and
+// every finger down is let go of. The view shows it (its level panel) and
+// says which was tapped (IOSTouch_PickLevel), or that it closed.
+static void IOSTouch_OpenLevelList(void)
+{
+  IOSTouch_SetTrayOpen(0);
+  if (!IOSTouch_CheatCanAct() || !IOSTouch_LevelPickShows()) return;
+  IOSTouch_DropTouches();
+  _bLevelListOpen = 1;
+}
+
+static void IOSTouch_CloseLevelList(void)
+{
+  _bLevelListOpen = 0;
+}
+
+// Level iLevel (1..ctLevels) tapped in the list: it closes, and the game
+// goes there (IOSTouch_TakeLevelPick)
+static void IOSTouch_PickLevel(int iLevel)
+{
+  const int bOpen = _bLevelListOpen;
+  _bLevelListOpen = 0;
+  if (!bOpen || !IOSTouch_CheatCanAct() || !IOSTouch_LevelPickShows() || iLevel < 1 || iLevel > _hud.ctLevels) return;
+  _iLevelPicked = iLevel;
+  _iRequests |= IOSTOUCH_REQ_LEVEL;
+}
+
+// Whether a touch on this button is a cheat's hold: CHEAT, or USE while the
+// cheat is on
+static int IOSTouch_IsCheatHold(int button)
+{
+  return button == BTN_CHEAT || button == BTN_USE;
+}
+
+// A finger moved away from where it went down on CHEAT or USE: no hold
+static void IOSTouch_CheatMoved(IOSTouchSlot *s, double x, double y)
+{
+  if (s->role != ROLE_BUTTON || s->bCheatDone || !IOSTouch_IsCheatHold(s->button)) return;
+  if (hypot(x - s->xDown, y - s->yDown) < IOSTOUCH_CHEAT_STILL) return;
+  s->bCheatDone = 1;
+}
+
+// Once a frame: the holds on CHEAT and USE, timed as SAVE's are (known: when
+// the previous tick ran); the list of levels closing once LEVEL is gone; the
+// tray re-placed as LEVEL comes and goes; a new level (no noclip in it)
+static void IOSTouch_TickCheat(double now, double known)
+{
+  if (_bLevelListOpen && (!IOSTouch_LevelPickShows() || !IOSTouch_CheatCanAct())) IOSTouch_CloseLevelList();
+  if (IOSTouch_LevelPickShows() != _bTrayLevelPlaced) IOSTouch_PlaceTray(IOSTouch_LevelPickShows());
+  if (_hud.uWorld != _uWorldSeen) {
+    _uWorldSeen = _hud.uWorld;
+    _bNoclip = 0;
+  }
+  float fCheatRing = 0.0f, fNoclipRing = 0.0f;
+  for (int i = 0; i < IOSTOUCH_MAX_TOUCHES; i++) {
+    IOSTouchSlot *s = &_aSlots[i];
+    if (!s->touch || s->role != ROLE_BUTTON || s->bCheatDone || !IOSTouch_IsCheatHold(s->button)) continue;
+    const double held = known - s->tDown;
+    const float fRing = (float)fmin(fmax(0.0, (now - s->tDown) / IOSTOUCH_CHEAT_HOLD), 1.0);
+    if (s->button == BTN_CHEAT) {
+      if (_iMode != IOSTOUCH_GAMEPLAY || !IOSTouch_IsOnButton(s->x, s->y, BTN_CHEAT)) {
+        s->bCheatDone = 1;
+      }
+      else if (held >= IOSTOUCH_CHEAT_HOLD) {
+        s->bCheatDone = 1;
+        IOSTouch_ToggleCheat();
+      }
+      else {
+        fCheatRing = fmaxf(fCheatRing, fRing);
+      }
+      continue;
+    }
+    // USE: through walls, or back (nothing to do with the cheat off)
+    if (!IOSTouch_CheatCanAct()) {
+      s->bCheatDone = 1;
+      continue;
+    }
+    if (held < IOSTOUCH_CHEAT_HOLD) {
+      fNoclipRing = fmaxf(fNoclipRing, fRing);
+      continue;
+    }
+    s->bCheatDone = 1;
+    _ctCheatTicks++;
+    _bNoclip = !_bNoclip;
+    IOSTouch_Message(_bNoclip ? "Noclip: through walls (hold USE again to stop)" : "Noclip off");
+  }
+  _fCheatRing = fCheatRing;
+  _fNoclipRing = fNoclipRing;
+}
+
+// The cheat button's picture (IOSGame.cpp makes it from the game's own art:
+// BJ's face), and a grey one for while the cheat is off; whether the view
+// has made images of them yet
+static unsigned char *_pubCheatIcon = NULL, *_pubCheatIconGrey = NULL;
+static int _iCheatIconW = 0, _iCheatIconH = 0, _bCheatIconAsked = 0, _bCheatIconNew = 0;
+
+int IOSTouch_WantsCheatIcon(void)
+{
+  return !_bCheatIconAsked;
+}
+
+void IOSTouch_SetCheatIcon(const unsigned char *pubRGBA, int iWidth, int iHeight)
+{
+  _bCheatIconAsked = 1;
+  if (!pubRGBA || iWidth <= 0 || iHeight <= 0 || iWidth > IOSTOUCH_ICON_MAX || iHeight > IOSTOUCH_ICON_MAX) return;
+  const size_t n = (size_t)iWidth * iHeight;
+  unsigned char *c = (unsigned char *)malloc(n * 4), *g = (unsigned char *)malloc(n * 4);
+  if (!c || !g) {
+    free(c);
+    free(g);
+    return;
+  }
+  memcpy(c, pubRGBA, n * 4);
+  for (size_t k = 0; k < n; k++) {
+    const unsigned char *p = pubRGBA + k * 4;
+    const int v = (int)lround((p[0] * 0.30 + p[1] * 0.59 + p[2] * 0.11) * 0.8);
+    g[k * 4] = g[k * 4 + 1] = g[k * 4 + 2] = (unsigned char)v;
+    g[k * 4 + 3] = p[3];
+  }
+  free(_pubCheatIcon);
+  free(_pubCheatIconGrey);
+  _pubCheatIcon = c;
+  _pubCheatIconGrey = g;
+  _iCheatIconW = iWidth;
+  _iCheatIconH = iHeight;
+  _bCheatIconNew = 1;
 }
 
 // ---------------------------------------------------------------- weapon wheel
@@ -1006,9 +1333,16 @@ static void IOSTouch_WheelBuild(void)
 }
 
 // The game holds still while the weapon wheel is open
+// The game holds still while the weapon wheel or the cheat's list of levels
+// is open
 int IOSTouch_HoldsGame(void)
 {
-  return _bWheelOpen && _iMode == IOSTOUCH_GAMEPLAY;
+  return (_bWheelOpen || _bLevelListOpen) && _iMode == IOSTOUCH_GAMEPLAY;
+}
+
+static int IOSTouch_WheelIsOpen(void)
+{
+  return _bWheelOpen;
 }
 
 static const IOSTouchWheelMap *IOSTouch_WheelMapOf(int iMap)
@@ -1947,6 +2281,13 @@ static void IOSTouch_TouchBegan(const void *touch, double x, double y, double W,
   s->uSeq = ++_uTouchSeq;
   s->trayButton = -1;
   s->wheelSlot = -1;
+  // The cheat's open list of levels: a touch off it closes it, and does
+  // nothing else (the list takes its own touches)
+  if (_bLevelListOpen) {
+    IOSTouch_CloseLevelList();
+    s->role = ROLE_IGNORED;
+    return;
+  }
   // The open weapon wheel takes every touch: on a slice it is a tap there,
   // anywhere else it closes the wheel as it lifts
   if (_bWheelOpen) {
@@ -1990,7 +2331,7 @@ static void IOSTouch_TouchBegan(const void *touch, double x, double y, double W,
   else if (s->button >= 0) {
     s->role = ROLE_BUTTON;
     _aButtonHeld[s->button]++;
-    s->xDown = x; // (MAP's and RUN's slide is measured from here)
+    s->xDown = x; // (MAP's slide, and CHEAT's and USE's stillness, are measured from here)
     s->yDown = y;
     if (_aButtons[s->button].kind == KIND_KEY) {
       // BACK and the arrows: their key now, again while held
@@ -2013,6 +2354,7 @@ static void IOSTouch_TouchBegan(const void *touch, double x, double y, double W,
     _fStickOriginX = x;
     _fStickOriginY = y;
     _fStickX = _fStickY = 0.0f;
+    IOSTouch_PlaceRunMarker(x, y);
   }
   else {
     s->role = ROLE_LOOK;
@@ -2058,9 +2400,9 @@ static int IOSTouch_TouchMoved(const void *touch, double x, double y)
       bLooksChanged = 1;
     }
   }
-  else if (s->role == ROLE_BUTTON && (s->button == BTN_MAP || s->button == BTN_RUN) && !s->bFired
+  else if (s->role == ROLE_BUTTON && s->button == BTN_MAP && !s->bFired
            && hypot(x - s->xDown, y - s->yDown) >= IOSTOUCH_TAP_SLIDE) {
-    // MAP or RUN slid: a look that started on it (below), so its lift does nothing
+    // MAP slid: its lift does nothing
     s->bFired = 1;
   }
   else if (s->role == ROLE_MENUS) {
@@ -2091,11 +2433,17 @@ static int IOSTouch_TouchMoved(const void *touch, double x, double y)
     if (len > 1.0f) { dx /= len; dy /= len; }
     _fStickX = dx;
     _fStickY = dy;
+    // onto the run marker (a tick) or off it
+    const int bRun = IOSTouch_StickOnRunMarker(x, y);
+    if (bRun && !_bStickRunning) _ctRunTicks++;
+    if (bRun != _bStickRunning) bLooksChanged = 1;
+    _bStickRunning = bRun;
     IOSTouch_SetMoveFromStick();
   }
+  IOSTouch_CheatMoved(s, x, y);
   if (s->role == ROLE_LOOK || (s->role == ROLE_BUTTON && _aButtons[s->button].bLookWhileHeld)) {
-    const float fLookX = (float)(x - s->x) * IOSTOUCH_LOOK_SCALE_X;
-    const float fLookY = (float)(y - s->y) * IOSTOUCH_LOOK_SCALE_Y;
+    const float fLookX = (float)(x - s->x) * IOSTOUCH_LOOK_SCALE_X * _fLookScale;
+    const float fLookY = (float)(y - s->y) * IOSTOUCH_LOOK_SCALE_Y * _fLookScale;
     os_unfair_lock_lock(&_lock);
     if (_bReading) {
       _fLookX += fLookX;
@@ -2103,7 +2451,7 @@ static int IOSTouch_TouchMoved(const void *touch, double x, double y)
     }
     os_unfair_lock_unlock(&_lock);
   }
-  // QUICK SAVE, QUICK LOAD: a finger that leaves the button, even between two
+  // SAVE, LOAD: a finger that leaves the button, even between two
   // frames, doesn't save or load, even if it comes back on (IOSTouch_TickHolds
   // checks too, for a button that moved away from a finger keeping still)
   if (s->role == ROLE_BUTTON && IOSTouch_IsQuickHold(s->button) && !IOSTouch_IsOnButton(x, y, s->button)) {
@@ -2116,7 +2464,7 @@ static int IOSTouch_TouchMoved(const void *touch, double x, double y)
 
 // A finger passed (x,y) on its way to where IOSTouch_TouchMoved is told it
 // went next (UIKit merges a finger's moves while the game's frame runs, and
-// keeps the places in between): only QUICK SAVE and QUICK LOAD care, so a
+// keeps the places in between): only SAVE and LOAD care, so a
 // slide off one and back on still ends its hold
 static void IOSTouch_TouchPassed(const void *touch, double x, double y)
 {
@@ -2207,10 +2555,23 @@ static void IOSTouch_TouchEnded(const void *touch, double x, double y, int bCanc
     // be dragged off again
     if (!bCancelled && IOSTouch_LiftsOnButton(x, y, s->button)) {
       if (b->kind == KIND_TAP && !s->bFired) {
-        _iRequests |= b->ulAction; // (MAP, RUN: not once it slid -- a look)
+        _iRequests |= b->ulAction; // (MAP: not once it slid)
       }
-      else if (IOSTouch_IsTrayButton(s->button) && !((s->button == BTN_TRAYFPS || s->button == BTN_TRAYOPACITY) && s->bFired)) {
-        IOSTouch_UseTrayButton(s->button); // (not the tray's FPS slid off, or OPACITY once held: that set 100%)
+      else if ((b->kind == KIND_HOLDSAVE || b->kind == KIND_HOLDLOAD) && !s->bFired) {
+        // SAVE, LOAD tapped: the game's Save Game or Load Game menu (only a
+        // finished hold saves or loads)
+        // (SAVE wins a tie: LOAD's tap does nothing while SAVE is held)
+        int bSaveHeld = 0;
+        for (int k = 0; k < IOSTOUCH_MAX_TOUCHES; k++) {
+          const IOSTouchSlot *o = &_aSlots[k];
+          if (o != s && o->touch && o->role == ROLE_BUTTON && o->button == BTN_QUICKSAVE) bSaveHeld = 1;
+        }
+        if (b->kind == KIND_HOLDSAVE) _iRequests |= IOSTOUCH_REQ_SAVEMENU;
+        else if (!bSaveHeld) _iRequests |= IOSTOUCH_REQ_LOADMENU;
+      }
+      else if (IOSTouch_IsTrayButton(s->button)
+               && !((s->button == BTN_TRAYFPS || s->button == BTN_TRAYOPACITY || s->button == BTN_TRAYLOOK) && s->bFired)) {
+        IOSTouch_UseTrayButton(s->button); // (not the tray's FPS slid off, or OPACITY or LOOK once held: that set the default)
       }
       else if (b->kind == KIND_MENU && !s->bFired) {
         _iRequests |= b->ulAction; // a tap: the menu
@@ -2218,6 +2579,9 @@ static void IOSTouch_TouchEnded(const void *touch, double x, double y, int bCanc
     }
     if (s->button == BTN_TRAYFPS) _fFpsRing = 0.0f;
     if (s->button == BTN_TRAYOPACITY) _fOpacityRing = 0.0f;
+    if (s->button == BTN_TRAYLOOK) _fLookRing = 0.0f;
+    if (s->button == BTN_CHEAT) _fCheatRing = 0.0f;
+    if (s->button == BTN_USE) _fNoclipRing = 0.0f;
     // MENU held until its tray opened, then slid onto one of its buttons
     if (!bCancelled && s->button == BTN_MENU && s->bFired && _bTrayOpen) {
       const int tb = IOSTouch_ButtonAt(x, y);
@@ -2230,6 +2594,7 @@ static void IOSTouch_TouchEnded(const void *touch, double x, double y, int bCanc
   }
   else if (s->role == ROLE_STICK) {
     _bStickActive = 0;
+    _bStickRunning = 0;
     _fStickX = _fStickY = 0.0f;
     IOSTouch_SetMoveFromStick();
   }
@@ -2241,11 +2606,11 @@ static void IOSTouch_TouchEnded(const void *touch, double x, double y, int bCanc
   IOSTouch_SetHeld(IOSTouch_HeldButtons(), ulLifted);
 }
 
-// Once per frame while shown: the QUICK SAVE, QUICK LOAD and MENU holds,
+// Once per frame while shown: the SAVE, LOAD and MENU holds,
 // NEXT WPN's, the tray's FPS and OPACITY, the menus' keys held
 static void IOSTouch_TickHolds(double now)
 {
-  // QUICK SAVE and QUICK LOAD go off only once the finger is known to have
+  // SAVE and LOAD go off only once the finger is known to have
   // stayed down long enough, so they are timed to the previous tick, not this
   // one. UIKit hands over touches whenever SDL pumps events, which UZDoom
   // does at least once each frame before it draws (I_StartTic): by now, then, every lift made
@@ -2266,7 +2631,7 @@ static void IOSTouch_TickHolds(double now)
   // NEXT WPN held still (it hasn't slid, or the wheel would
   // be open): known to be held IOSTOUCH_WHEEL_HOLD, the wheel opens to tap a
   // slice; until then the ring fills. The first to get there opens it (which
-  // drops the other). This comes before the QUICK SAVE, QUICK LOAD and MENU
+  // drops the other). This comes before the SAVE, LOAD and MENU
   // holds: one that completes in the same tick is then dropped by the wheel
   // opening, which ignores every other touch, rather than saving or loading
   // under the wheel. While the wheel couldn't open (the player dead...)
@@ -2291,9 +2656,10 @@ static void IOSTouch_TickHolds(double now)
   }
   _afWheelRing[0] = afWheelRing[0];
   _afWheelRing[1] = afWheelRing[1];
-  // the furthest along of QUICK SAVE's and of QUICK LOAD's holds (a touch each)
+  // the furthest along of SAVE's and of LOAD's holds (a touch each)
   _fFpsRing = 0.0f; // (set again below while the tray's FPS is held)
   _fOpacityRing = 0.0f; // (...and OPACITY)
+  _fLookRing = 0.0f; // (...and LOOK)
   float fSaveRing = 0.0f, fLoadRing = 0.0f;
   int iDone = -1; // the quick hold that completed: BTN_QUICKSAVE or BTN_QUICKLOAD
   for (int i = 0; i < IOSTOUCH_MAX_TOUCHES; i++) {
@@ -2311,9 +2677,9 @@ static void IOSTouch_TickHolds(double now)
       }
       const double hold = (s->button == BTN_QUICKSAVE) ? IOSTOUCH_QUICKSAVE_HOLD : IOSTOUCH_QUICKLOAD_HOLD;
       if (known - s->tDown >= hold) {
-        // the ring is full, with the finger still on it. QUICK SAVE and QUICK
+        // the ring is full, with the finger still on it. SAVE and QUICK
         // LOAD both found done in the same tick (one long frame can cover
-        // both, whichever was touched first): QUICK SAVE, as only a load
+        // both, whichever was touched first): SAVE, as only a load
         // throws away the game being played
         if (iDone != BTN_QUICKSAVE) iDone = s->button;
       }
@@ -2341,6 +2707,25 @@ static void IOSTouch_TickHolds(double now)
       }
       else {
         _fOpacityRing = (float)progress;
+      }
+    }
+    else if (s->button == BTN_TRAYLOOK) {
+      // the tray's LOOK held: back to 1x (the lift then does nothing)
+      if (!IOSTouch_LiftsOnButton(s->x, s->y, BTN_TRAYLOOK)) {
+        s->bFired = 1;
+        _fLookRing = 0.0f;
+        continue;
+      }
+      const double progress = (now - s->tDown) / IOSTOUCH_MENU_HOLD;
+      if (progress >= 1.0) {
+        s->bFired = 1;
+        _fLookRing = 0.0f;
+        _fLookScale = 1.0f;
+        _ctLookResets++;
+        IOSTouch_Message("Look speed back to the default, 1x");
+      }
+      else {
+        _fLookRing = (float)progress;
       }
     }
     else if (s->button == BTN_TRAYFPS) {
@@ -2371,7 +2756,7 @@ static void IOSTouch_TickHolds(double now)
     }
   }
   if (iDone >= 0) {
-    // One save or load, once: it ends every hold on QUICK SAVE and QUICK LOAD,
+    // One save or load, once: it ends every hold on SAVE and LOAD,
     // so two fingers on one button ask once, and the two buttons held together
     // save or load, whichever is found done first, never both (both would only
     // load back the game just saved, or save again the one just loaded)
@@ -2384,6 +2769,7 @@ static void IOSTouch_TickHolds(double now)
   }
   _fSaveRing = fSaveRing;
   _fLoadRing = fLoadRing;
+  IOSTouch_TickCheat(now, known);
 }
 
 // Once per frame while shown: the FPS readout counts the frames the game
@@ -2406,7 +2792,7 @@ static void IOSTouch_CountFrames(unsigned int ulFrames, double now)
 }
 
 // Whether the FPS readout is under the open tray's backing (it keeps clear
-// of the FPS and keyboard buttons' part, not of GYRO's and SENS's): it
+// of the FPS and keyboard buttons' part, not of the rest's): it
 // hides while the tray is open
 static int IOSTouch_FpsUnderTray(void)
 {
@@ -2429,176 +2815,6 @@ static void IOSTouch_VersionCentre(double fHalfW, double *px, double *py)
   *py = _rTrayBack.y1 + 4.0 + IOSTOUCH_VERSION_H * 0.5;
 }
 
-// ---------------------------------------------------------------- tilt aiming
-// The view starts and stops CoreMotion's updates (IOSTouch_GyroRunUpdates)
-// and hands each sample to IOSTouch_GyroSample, on the samples' own queue;
-// IOSTouch_GyroFrame runs once a frame on the main thread, after the
-// frame's touches came in, and hands what may aim to the game's
-// IOSTouch_TakeGyro (either game thread). The two locks are never held
-// together.
-
-static void IOSTouch_GyroRunUpdates(int bRun); // the view's (CoreMotion)
-
-// One sample of device motion, on the samples' queue: the rotation rate w
-// (rad/s) and gravity g (toward the ground) in the device's own axes (x
-// right, y up, z out of the screen, as if held upright), taken at time t.
-// Adds how far it turns and tilts the view.
-static void IOSTouch_GyroSample(double wx, double wy, double wz, double gx, double gy, double gz, double t)
-{
-  os_unfair_lock_lock(&_gyroLock);
-  const double dt = _tGyroLastSample > 0.0 ? t - _tGyroLastSample : 0.0;
-  _tGyroLastSample = t;
-  const double s = _iGyroSide;
-  const double gn = sqrt(gx * gx + gy * gy + gz * gz);
-  if (s != 0.0 && dt > 0.0 && dt <= IOSTOUCH_GYRO_MAX_DT && gn > 0.1) {
-    // The screen's axes as the player sees it: right, up, toward them. How
-    // fast the phone turns about each (the right-hand way round: + about up
-    // turns left), and how far each points up.
-    const double rx = s * wy, ry = -s * wx, rz = wz;
-    const double ux = -s * gy / gn, uy = s * gx / gn, uz = -gz / gn;
-    // Not while held upside down for the way round the screen is turned
-    // (rolled more than 120 degrees either way, unless within 30 of flat):
-    // the phone is on its way round to the other landscape side
-    const double tilt = sqrt(ux * ux + uy * uy);
-    if (tilt < 0.5 || uy > -0.5 * tilt) {
-      double yaw = ry, pitch = rx;
-      if (uz >= 0.0 && (tilt < 0.5 || uy > 0.5 * tilt)) {
-        // Player space, while the screen faces up and is held the way round
-        // it is turned (rolled less than 60 degrees either way) or about
-        // flat: turning is about up, from the screen's up and
-        // toward-the-player axes as far as each points up
-        yaw = uy * ry + uz * rz;
-        const double mag = sqrt(ry * ry + rz * rz);
-        yaw = copysign(fmin(fabs(yaw) * IOSTOUCH_GYRO_YAW_RELAX, mag), yaw);
-      }
-      // (Otherwise local space: facing down, or rolled further over --
-      // which also leaves out the roll of a phone on its way round.)
-      yaw *= 180.0 / M_PI;
-      pitch *= 180.0 / M_PI;
-
-      // Smoothed only where it is slow
-      double m = sqrt(yaw * yaw + pitch * pitch);
-      double direct = (m - IOSTOUCH_GYRO_SMOOTH * 0.5) / (IOSTOUCH_GYRO_SMOOTH * 0.5);
-      direct = direct < 0.0 ? 0.0 : (direct > 1.0 ? 1.0 : direct);
-      _afGyroSmooth[_iGyroSmoothNext][0] = yaw * (1.0 - direct);
-      _afGyroSmooth[_iGyroSmoothNext][1] = pitch * (1.0 - direct);
-      _iGyroSmoothNext = (_iGyroSmoothNext + 1) % IOSTOUCH_GYRO_SMOOTH_N;
-      double sumYaw = 0.0, sumPitch = 0.0;
-      for (int i = 0; i < IOSTOUCH_GYRO_SMOOTH_N; i++) {
-        sumYaw += _afGyroSmooth[i][0];
-        sumPitch += _afGyroSmooth[i][1];
-      }
-      yaw = yaw * direct + sumYaw / IOSTOUCH_GYRO_SMOOTH_N;
-      pitch = pitch * direct + sumPitch / IOSTOUCH_GYRO_SMOOTH_N;
-
-      // The soft dead zone
-      m = sqrt(yaw * yaw + pitch * pitch);
-      if (m < IOSTOUCH_GYRO_SOFT) {
-        yaw *= m / IOSTOUCH_GYRO_SOFT;
-        pitch *= m / IOSTOUCH_GYRO_SOFT;
-      }
-      _fGyroQueueYaw += yaw * dt;
-      _fGyroQueuePitch += pitch * dt;
-    }
-  }
-  os_unfair_lock_unlock(&_gyroLock);
-}
-
-// A sample came back refused (the samples' queue): no tilt aiming from the
-// next frame on
-static void IOSTouch_GyroRefusedOnQueue(void)
-{
-  os_unfair_lock_lock(&_gyroLock);
-  _bGyroRefusedOnQueue = 1;
-  os_unfair_lock_unlock(&_gyroLock);
-}
-
-// Starts or stops the motion updates
-static void IOSTouch_GyroRun(int bRun)
-{
-  bRun = bRun != 0;
-  if (bRun == _bGyroRunning) return;
-  _bGyroRunning = bRun;
-  if (!bRun) {
-    IOSTouch_GyroRunUpdates(0);
-    return;
-  }
-  // From scratch: nothing from before it stopped, the smoothing empty
-  os_unfair_lock_lock(&_gyroLock);
-  _tGyroLastSample = 0.0;
-  _fGyroQueueYaw = _fGyroQueuePitch = 0.0;
-  memset(_afGyroSmooth, 0, sizeof(_afGyroSmooth));
-  os_unfair_lock_unlock(&_gyroLock);
-  IOSTouch_GyroRunUpdates(1);
-}
-
-// Whether either thumb is down on the game, for TOUCH: the left one on the
-// move stick (pushed or resting), or a right one where it aims -- on the
-// look area (resting or dragging), or on one of the buttons a drag on also
-// looks (FIRE, CROUCH, USE, MAP, JUMP). So with the left thumb on the
-// stick, the right one can hop from the look area onto FIRE (and is in the
-// air for a moment) without the aiming stopping. Not the top row, the tray,
-// or a touch being ignored.
-static int IOSTouch_GyroThumbDown(void)
-{
-  for (int i = 0; i < IOSTOUCH_MAX_TOUCHES; i++) {
-    const IOSTouchSlot *s = &_aSlots[i];
-    if (!s->touch) continue;
-    if (s->role == ROLE_STICK || s->role == ROLE_LOOK
-        || (s->role == ROLE_BUTTON && _aButtons[s->button].bLookWhileHeld)) return 1;
-  }
-  return 0;
-}
-
-// Once per frame, after the frame's touches came in (bShown: whether the
-// overlay is up; bActive: whether the app is in front; side: which way round
-// the screen is turned, +1 landscape left, -1 landscape right, 0 neither).
-// The motion updates run only while the game is being played with the
-// overlay up, the app in front, tilt aiming on and the screen turned either
-// landscape way. What the phone turned since the last frame goes to the
-// game, for the player's rotation (IOSTouch_TakeGyro) -- if it could aim
-// both then and now, so in TOUCH lifting the last thumb freezes the view
-// where it is (the frame it lifted in counts for nothing, as does the frame
-// the first one lands in) and nothing springs back, and touching again
-// carries on from there, from however the phone is held by then. Never
-// while MENU's tray or the weapon wheel is open (the frame it closes in
-// counts for nothing either, so nothing jumps), just after the screen turned round to the
-// other landscape side, nor after a frame that took too long; and only
-// while the game reads the touch controls, so nothing is left waiting for
-// it across a pause.
-static void IOSTouch_GyroFrame(int bShown, int bActive, int side, double now)
-{
-  if (side != 0 && _iGyroLastSide != 0 && side != _iGyroLastSide) _tGyroTurnedRound = now;
-  if (side != 0) _iGyroLastSide = side;
-  IOSTouch_GyroRun(bShown && _iMode == IOSTOUCH_GAMEPLAY && bActive && side != 0 && _iGyroMode != IOSTOUCH_GYRO_OFF
-                   && IOSTouch_GyroAvailable());
-
-  os_unfair_lock_lock(&_gyroLock);
-  _iGyroSide = side;
-  const double yaw = _fGyroQueueYaw, pitch = _fGyroQueuePitch;
-  _fGyroQueueYaw = _fGyroQueuePitch = 0.0;
-  _bGyroRefused |= _bGyroRefusedOnQueue; // (stops it next frame)
-  os_unfair_lock_unlock(&_gyroLock);
-
-  const int bOk = _bGyroRunning && (_iGyroMode == IOSTOUCH_GYRO_ALWAYS || IOSTouch_GyroThumbDown()) && !_bTrayOpen
-                  && now - _tGyroTurnedRound >= IOSTOUCH_GYRO_TURN_HOLD && !IOSTouch_HoldsGame();
-  const int bUse = bOk && _bGyroWasOk && now - _tGyroLastFrame <= IOSTOUCH_GYRO_MAX_FRAME;
-  _bGyroWasOk = bOk;
-  _tGyroLastFrame = now;
-  if (!bUse) return;
-
-  // Degrees, straight into the player's view angles (IOSGame.cpp:
-  // G_AddViewAngle / G_AddViewPitch): the game's mouse settings never apply,
-  // so at 1.0x the view turns as far as the phone
-  const float k = _afGyroSens[_iGyroSens];
-  os_unfair_lock_lock(&_lock);
-  if (_bReading) {
-    _fGyroYaw += (float)yaw * k;
-    _fGyroPitch += (float)pitch * k;
-  }
-  os_unfair_lock_unlock(&_lock);
-}
-
 // Lets go of every touch and closes the tray and the weapon wheel (on every
 // change of mode);
 // bReading: whether the game gets input now
@@ -2608,13 +2824,16 @@ static void IOSTouch_ResetTouches(int bReading)
   memset(_aSlots, 0, sizeof(_aSlots));
   memset(_aButtonHeld, 0, sizeof(_aButtonHeld));
   _bStickActive = 0;
+  _bStickRunning = 0;
+  _bRunMarker = 0;
   _fStickX = _fStickY = 0.0f;
   _iRequests = 0;
   _ctMenuKeys = 0;
-  _fSaveRing = _fLoadRing = _fMenuRing = 0.0f;
+  _fSaveRing = _fLoadRing = _fMenuRing = _fLookRing = 0.0f;
+  _fCheatRing = _fNoclipRing = 0.0f;
+  _bLevelListOpen = 0; // (the cheat's list of levels closes too)
   _tLastTick = 0.0;
   _bFpsBase = 0;
-  _bGyroWasOk = 0; // the next frame's motion doesn't count
   // the weapon wheel closes, picking nothing (the game no longer held)
   _bWheelOpen = _bWheelTapMode = 0;
   _iWheelHot = -1;
@@ -2646,6 +2865,7 @@ void IOSTouch_ReadInput(IOSTouchInput *pInput)
   if (_bReading) {
     pInput->fMoveX = _fMoveX;
     pInput->fMoveY = _fMoveY;
+    pInput->bRun = _bMoveRun;
     const unsigned int ulWeaponKeys = IOSTOUCH_NEXTWEAPON;
     const int bPickBusy = _iPickPending || _iPickReads > 0 || _bPickGap; // (a NEXT/PREV tap waits)
     int bKeysBusy = 0;                                  // NEXT/PREV read now, or this is the tick after
@@ -2698,24 +2918,14 @@ void IOSTouch_TakeLook(float *pfDX, float *pfDY)
   os_unfair_lock_unlock(&_lock);
 }
 
-void IOSTouch_TakeGyro(float *pfYaw, float *pfPitch)
-{
-  os_unfair_lock_lock(&_lock);
-  *pfYaw = _bReading ? _fGyroYaw : 0.0f;
-  *pfPitch = _bReading ? _fGyroPitch : 0.0f;
-  _fGyroYaw = _fGyroPitch = 0.0f;
-  os_unfair_lock_unlock(&_lock);
-}
-
 #ifndef IOSTOUCH_RIG
 // ---------------------------------------------------------------- overlay view
 
-// Kept in the app's settings: whether the FPS readout shows; tilt aiming's
-// mode (0 OFF, 1 TOUCH, 2 ALWAYS; never set or not one of those: OFF) and
-// sensitivity (the nearest of _afGyroSens; never set: 1.5x)
+// Kept in the app's settings: whether the FPS readout shows; the look speed
+// (never set: 1x); whether CHEAT shows (the cheat itself is off each launch)
 #define IOSTOUCH_FPS_DEFAULTS_KEY @"iosTouchShowFps"
-#define IOSTOUCH_GYRO_DEFAULTS_KEY @"iosTouchGyroMode"
-#define IOSTOUCH_GYRO_SENS_DEFAULTS_KEY @"iosTouchGyroSens"
+#define IOSTOUCH_LOOKSCALE_DEFAULTS_KEY @"iosTouchLookScale"
+#define IOSTOUCH_CHEAT_DEFAULTS_KEY @"iosTouchShowCheat"
 // ...and OPACITY's strength (never set: 100%), and its slider's size
 #define IOSTOUCH_OPACITY_DEFAULTS_KEY @"iosTouchOpacity"
 #define IOSTOUCH_OPACITY_W 260.0
@@ -2738,64 +2948,6 @@ static NSString *IOSTouch_VersionText(void)
     return [NSString stringWithFormat:@"build %@ \u00B7 %s %d", num, months[m - 1], d];
   }
   return [NSString stringWithFormat:@"build %@", num];
-}
-
-// Tilt aiming's motion manager (one for the app, as Apple asks) and the
-// queue its samples are handled on
-static CMMotionManager *_pMotion = nil;
-static NSOperationQueue *_pMotionQueue = nil;
-
-// Whether an error the motion updates hand back is iOS refusing the motion
-// data (no permission: none is asked for today, but iOS could start to)
-static int IOSTouch_GyroIsRefusal(NSError *err)
-{
-  if (![err.domain isEqualToString:CMErrorDomain]) return 0;
-  return err.code == CMErrorNotAuthorized || err.code == CMErrorNotEntitled
-         || err.code == CMErrorMotionActivityNotAuthorized || err.code == CMErrorMotionActivityNotEntitled;
-}
-
-// Starts or stops CoreMotion's updates (IOSTouch_GyroRun decides when)
-static void IOSTouch_GyroRunUpdates(int bRun)
-{
-  if (!bRun) {
-    [_pMotion stopDeviceMotionUpdates];
-    return;
-  }
-  _pMotion.deviceMotionUpdateInterval = 1.0 / IOSTOUCH_GYRO_HZ;
-  // (the reference frame that needs no compass: the attitude isn't used)
-  [_pMotion startDeviceMotionUpdatesUsingReferenceFrame:CMAttitudeReferenceFrameXArbitraryZVertical
-                                                toQueue:_pMotionQueue
-                                            withHandler:^(CMDeviceMotion *dm, NSError *err) {
-    if (err && IOSTouch_GyroIsRefusal(err)) IOSTouch_GyroRefusedOnQueue();
-    if (!dm || err) return;
-    const CMRotationRate w = dm.rotationRate;
-    const CMAcceleration g = dm.gravity;
-    IOSTouch_GyroSample(w.x, w.y, w.z, g.x, g.y, g.z, dm.timestamp);
-  }];
-}
-
-// Once, as the overlay is made: the motion manager and the queue for its
-// samples (nothing runs yet), and the settings -- OFF and 1.5x unless set
-static void IOSTouch_GyroSetup(void)
-{
-  if (_pMotion) return;
-  _pMotion = [[CMMotionManager alloc] init];
-  _pMotionQueue = [[NSOperationQueue alloc] init];
-  _pMotionQueue.maxConcurrentOperationCount = 1; // in order, one at a time
-  _pMotionQueue.qualityOfService = NSQualityOfServiceUserInteractive;
-  _bGyroAvailable = _pMotion.deviceMotionAvailable ? 1 : 0;
-
-  NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-  if ([d objectForKey:IOSTOUCH_GYRO_DEFAULTS_KEY]) {
-    const NSInteger m = [d integerForKey:IOSTOUCH_GYRO_DEFAULTS_KEY];
-    _iGyroMode = (m >= 0 && m < IOSTOUCH_GYRO_NUM_MODES) ? (int)m : IOSTOUCH_GYRO_OFF;
-  }
-  if ([d objectForKey:IOSTOUCH_GYRO_SENS_DEFAULTS_KEY]) {
-    const float k = [d floatForKey:IOSTOUCH_GYRO_SENS_DEFAULTS_KEY];
-    for (int i = 0; i < IOSTOUCH_GYRO_NUM_SENS; i++) {
-      if (fabsf(_afGyroSens[i] - k) < fabsf(_afGyroSens[_iGyroSens] - k)) _iGyroSens = i;
-    }
-  }
 }
 
 static IOSTouchRect _rScoreFrac, _rHiScoreFrac, _rMessagesFrac; // the last boxes the HUD showed (fractions)
@@ -2839,21 +2991,66 @@ typedef struct {
   int aiAmmo[IOSTOUCH_WPN_MAX], aiMax[IOSTOUCH_WPN_MAX];
 } IOSTouchWheelKey;
 
-@interface IOSTouchOverlay : UIView {
+// The cheat's list of levels sits on this, which keeps the touches on it
+// (UIKit would hand those the list doesn't take on up to the overlay, which
+// would take them for touches outside it)
+@interface IOSTouchLevelPanel : UIView
+@end
+
+@implementation IOSTouchLevelPanel
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+@end
+
+@interface IOSTouchOverlay : UIView <UITableViewDataSource, UITableViewDelegate> {
   UIView *stickBase;
   UIView *stickKnob;
   UILabel *aButtonViews[IOSTOUCH_NUM_BUTTONS];
-  CAShapeLayer *saveRing; // QUICK SAVE's hold progress
-  CAShapeLayer *loadRing; // QUICK LOAD's
+  CAShapeLayer *saveRing; // SAVE's hold progress
+  CAShapeLayer *loadRing; // LOAD's
   CAShapeLayer *menuRing; // MENU's
   UIView *trayBack;       // behind MENU's tray
   UILabel *versionLabel;  // the build stamp, under the open tray
   UILabel *fpsLabel;      // the FPS readout...
   int iFpsLabel;          // ...the number it says (-1: none yet)
   int bFpsSaved;          // whether the app's settings say it shows
-  int iGyroModeSaved;     // tilt aiming's mode and sensitivity as the app's settings have them
-  int iGyroSensSaved;
-  int iGyroLabels;        // what GYRO's and SENS's labels say (-1: not yet set)
+  // The tray's LOOK: its hold's ring, what its label says and the app's
+  // settings have, the resets already felt (a thump each)
+  CAShapeLayer *lookRing;
+  float fLookLabel, fLookSaved;
+  int ctLookResetsFelt;
+  // The stick's run marker (Always Run off): its circle, its "^^", its line
+  // to the stick's ring; how it's lit (-1: not yet set); its tick; the ticks
+  // felt
+  UIView *runMarker;
+  CAShapeLayer *runChevrons;
+  CAShapeLayer *runLink;
+  int bRunLit;
+  UISelectionFeedbackGenerator *runTick;
+  int ctRunTicksFelt;
+  // The cheat: CHEAT's picture (BJ's face, in colour and grey), its ring,
+  // USE's noclip ring and the small label under USE, the button's look
+  // (-1: not yet set), CHEAT's showing as the app's settings have it, the
+  // taps felt (a thump each), the list of levels
+  CALayer *cheatFace;
+  id cheatImages[2];
+  CAShapeLayer *cheatRing;
+  CAShapeLayer *noclipRing;
+  UILabel *noclipLabel;
+  int iCheatLook;
+  int bCheatSaved;
+  int ctCheatTicksFelt;
+  UIImpactFeedbackGenerator *cheatThump;
+  UIView *levelPanel;
+  UILabel *levelTitle;
+  UIButton *levelClose;
+  UITableView *levelTable;
+  NSArray<NSString *> *aLevelNames;
+  NSArray<NSString *> *aLevelDetails;
+  int iLevelNow;
+  int bTrayLevelShown;    // the tray's buttons were last placed with LEVEL in it
   CAShapeLayer *aWheelRings[2]; // NEXT WPN's and PREV WPN's holds (they open the weapon wheel)
   // The weapon wheel (makeWheel): the dim and its disc, each slice, its icon
   // (the second layer unused here), count and name, the needle, the middle's
@@ -2903,6 +3100,12 @@ typedef struct {
 - (void)refreshButtonLooks;
 - (void)refreshStick;
 - (void)syncWheel;
+- (void)syncLevels;
+- (void)makeLevelPanel;
+- (void)makeCheat;
+- (void)setRunLit:(int)bLit;
+- (void)refreshCheat;
+- (void)placeLevelPanel;
 @end
 
 @implementation IOSTouchOverlay
@@ -2925,7 +3128,7 @@ static CGFloat IOSTouch_FontSize(const char *label, CGFloat radius)
   return radius >= 40 ? 16 : (radius >= 25 ? 13 : 10);
 }
 
-// SENS's and GYRO's font: condensed (as in the Jedi Knight port) so "ALWAYS"
+// The tray's font: condensed (as in the Jedi Knight port) so "ALWAYS"
 // fits a circle this small. Before iOS 16 the system font has no condensed
 // width, so it is a point smaller instead.
 static UIFont *IOSTouch_TrayFont(CGFloat size)
@@ -2934,6 +3137,12 @@ static UIFont *IOSTouch_TrayFont(CGFloat size)
   if (@available(iOS 16.0, *)) return [UIFont systemFontOfSize:size weight:UIFontWeightBold width:UIFontWidthCondensed];
 #endif
   return [UIFont boldSystemFontOfSize:size - 1];
+}
+
+// The cheat's gold (as the Serious Sam port's)
+static UIColor *IOSTouch_CheatGold(CGFloat alpha)
+{
+  return [UIColor colorWithRed:1.0 green:0.68 blue:0.18 alpha:alpha];
 }
 
 // A ring round a button of radius r that fills (strokeEnd) while it is held
@@ -2980,8 +3189,8 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
       [self addSubview:l];
     }
 
-    // Rings that fill while QUICK SAVE, QUICK LOAD and MENU are held. QUICK
-    // SAVE's and QUICK LOAD's look the same, and fill as quickly.
+    // Rings that fill while SAVE, LOAD and MENU are held. QUICK
+    // SAVE's and LOAD's look the same, and fill as quickly.
     saveRing = IOSTouch_MakeHoldRing(_aButtons[BTN_QUICKSAVE].radius);
     [aButtonViews[BTN_QUICKSAVE].layer addSublayer:saveRing];
     loadRing = IOSTouch_MakeHoldRing(_aButtons[BTN_QUICKLOAD].radius);
@@ -3017,14 +3226,24 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     versionLabel.userInteractionEnabled = NO;
     versionLabel.hidden = YES;
     [self insertSubview:versionLabel aboveSubview:trayBack];
-    // GYRO and SENS say what they are set to on a second line (labels set
-    // in refreshButtonLooks), sized for the longest
-    IOSTouch_GyroSetup();
-    iGyroModeSaved = _iGyroMode;
-    iGyroSensSaved = _iGyroSens;
-    iGyroLabels = -1;
-    for (int i = BTN_TRAYSENS; i <= BTN_TRAYFPS; i++) { // (OPACITY and FPS too)
-      aButtonViews[i].font = IOSTouch_TrayFont(IOSTouch_FontSize("GYRO\nALWAYS", _aButtons[i].radius));
+    // The tray's buttons in its condensed letters, sized for the longest
+    // (LOOK and OPACITY say what they are set to on a second line, set in
+    // refreshButtonLooks)
+    for (int i = BTN_TRAYLOOK; i <= BTN_TRAYLEVEL; i++) {
+      aButtonViews[i].font = IOSTouch_TrayFont(IOSTouch_FontSize("ALWAYS\nRUN", _aButtons[i].radius));
+    }
+    // The tray's LOOK: the look speed kept (1x unless changed), its ring
+    {
+      NSUserDefaults *dLook = [NSUserDefaults standardUserDefaults];
+      if ([dLook objectForKey:IOSTOUCH_LOOKSCALE_DEFAULTS_KEY]) {
+        const float k = [dLook floatForKey:IOSTOUCH_LOOKSCALE_DEFAULTS_KEY];
+        _fLookScale = (k == k) ? fminf(fmaxf(k, IOSTOUCH_LOOKSCALE_MIN), IOSTOUCH_LOOKSCALE_MAX) : 1.0f;
+      }
+      fLookSaved = _fLookScale;
+      fLookLabel = -1.0f;
+      lookRing = IOSTouch_MakeHoldRing(_aButtons[BTN_TRAYLOOK].radius);
+      [aButtonViews[BTN_TRAYLOOK].layer addSublayer:lookRing];
+      ctLookResetsFelt = _ctLookResets;
     }
     // The tray's FPS: just "FPS" (the frame rate is fixed at 60; a 120
     // saved by build 2 is ignored)
@@ -3090,10 +3309,50 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     stickBase.hidden = YES;
     stickKnob.hidden = YES;
     [self addSubview:stickBase];
+
+    // The stick's run marker (as the Jedi Knight port's): a small circle in
+    // the buttons' style with "^^" in it, under the knob (which sits on it
+    // while running), and its line to the stick's ring. Shown with the
+    // stick while Always Run is off.
+    runLink = [CAShapeLayer layer];
+    runLink.lineWidth = 1.5;
+    runLink.lineCap = kCALineCapRound;
+    runLink.fillColor = [UIColor clearColor].CGColor;
+    runLink.hidden = YES;
+    [self.layer insertSublayer:runLink above:stickBase.layer];
+    {
+      const CGFloat rr = IOSTOUCH_RUN_R;
+      runMarker = [[UIView alloc] initWithFrame:CGRectMake(0, 0, rr * 2, rr * 2)];
+      runMarker.layer.cornerRadius = rr;
+      runMarker.layer.borderWidth = 1.5;
+      runMarker.userInteractionEnabled = NO;
+      runMarker.hidden = YES;
+      runChevrons = [CAShapeLayer layer];
+      runChevrons.frame = CGRectMake(0, 0, rr * 2, rr * 2);
+      UIBezierPath *chev = [UIBezierPath bezierPath];
+      for (int i = 0; i < 2; i++) {
+        const CGFloat tip = rr - 5.5 + 5.5 * i; // two chevrons, 12pt wide, 5.5pt apart, centred
+        [chev moveToPoint:CGPointMake(rr - 6.0, tip + 5.0)];
+        [chev addLineToPoint:CGPointMake(rr, tip)];
+        [chev addLineToPoint:CGPointMake(rr + 6.0, tip + 5.0)];
+      }
+      runChevrons.path = chev.CGPath;
+      runChevrons.lineWidth = 2.0;
+      runChevrons.lineCap = kCALineCapRound;
+      runChevrons.lineJoin = kCALineJoinRound;
+      runChevrons.fillColor = [UIColor clearColor].CGColor;
+      [runMarker.layer addSublayer:runChevrons];
+      [self addSubview:runMarker];
+    }
+    bRunLit = -1;
+    runTick = [[UISelectionFeedbackGenerator alloc] init];
+    ctRunTicksFelt = _ctRunTicks;
     [self addSubview:stickKnob];
 
+    [self makeCheat];
     [self makeWheel];
     [self makeMessage];
+    [self makeLevelPanel];
     [self refreshButtonLooks];
   }
   return self;
@@ -3151,6 +3410,8 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     aButtonViews[i].center = CGPointMake(_aButtons[i].x, _aButtons[i].y);
   }
   trayBack.frame = CGRectMake(_rTrayBack.x0, _rTrayBack.y0, _rTrayBack.x1 - _rTrayBack.x0, _rTrayBack.y1 - _rTrayBack.y0);
+  bTrayLevelShown = _bTrayLevelPlaced;
+  if (!levelPanel.hidden) [self placeLevelPanel];
   fpsLabel.center = CGPointMake(_fFpsX, _fFpsY);
   camMessageLabel.center = CGPointMake(_fCamMessageX, _fCamMessageY);
 
@@ -3174,27 +3435,67 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
   if (!_bStickActive) {
     stickBase.hidden = YES;
     stickKnob.hidden = YES;
+    runMarker.hidden = YES;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    runLink.hidden = YES;
+    [CATransaction commit];
     return;
   }
   stickBase.alpha = stickKnob.alpha = _fOpacity; // (OPACITY's)
   stickBase.center = CGPointMake(_fStickOriginX, _fStickOriginY);
-  stickKnob.center = CGPointMake(_fStickOriginX + _fStickX * IOSTOUCH_STICK_RADIUS,
-                                 _fStickOriginY + _fStickY * IOSTOUCH_STICK_RADIUS);
+  // the knob follows the thumb, up to the ring -- or sits on the run marker
+  stickKnob.center = _bStickRunning ? CGPointMake(_fRunX, _fRunY)
+                                    : CGPointMake(_fStickOriginX + _fStickX * IOSTOUCH_STICK_RADIUS,
+                                                  _fStickOriginY + _fStickY * IOSTOUCH_STICK_RADIUS);
   stickBase.hidden = NO;
   stickKnob.hidden = NO;
+  // The run marker (none with Always Run on, or where it doesn't fit), and
+  // its line from the ring to the marker's edge
+  const int bMarker = _bRunMarker && !_hud.bRunOn;
+  runMarker.center = CGPointMake(_fRunX, _fRunY);
+  if (runMarker.hidden == bMarker) runMarker.hidden = !bMarker;
+  const CGFloat R = IOSTOUCH_RUN_R;
+  const CGFloat dx = _fRunX - _fStickOriginX, dy = _fRunY - _fStickOriginY, d = sqrt(dx * dx + dy * dy);
+  const int bLink = bMarker && d - R - IOSTOUCH_STICK_RADIUS > 1.0;
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  if (bLink) {
+    UIBezierPath *p = [UIBezierPath bezierPath];
+    [p moveToPoint:CGPointMake(_fStickOriginX + dx / d * IOSTOUCH_STICK_RADIUS, _fStickOriginY + dy / d * IOSTOUCH_STICK_RADIUS)];
+    [p addLineToPoint:CGPointMake(_fStickOriginX + dx / d * (d - R), _fStickOriginY + dy / d * (d - R))];
+    runLink.path = p.CGPath;
+  }
+  runLink.hidden = !bLink;
+  [CATransaction commit];
+  [self setRunLit:_bStickRunning];
+  if (ctRunTicksFelt != _ctRunTicks) {
+    ctRunTicksFelt = _ctRunTicks;
+    [runTick selectionChanged]; // (onto the marker: running)
+    [runTick prepare];
+  }
 }
 
-// What the tray's GYRO and SENS say: the mode and the sensitivity (NO GYRO
-// without one)
-- (void)refreshGyroLabels
+// The run marker's look: as an idle button (a little darker inside, so its
+// "^^" shows over bright walls too), or lit (blue) at full strength while
+// the thumb is on it -- both times OPACITY's strength, as the buttons
+- (void)setRunLit:(int)bLit
 {
-  static const char *const astrMode[IOSTOUCH_GYRO_NUM_MODES] = { "OFF", "TOUCH", "ALWAYS" };
-  const int bGyro = IOSTouch_GyroAvailable();
-  const int iLabels = (bGyro ? 1 : 0) + 2 * (_iGyroMode + IOSTOUCH_GYRO_NUM_MODES * _iGyroSens);
-  if (iLabels == iGyroLabels) return;
-  iGyroLabels = iLabels;
-  aButtonViews[BTN_TRAYGYRO].text = bGyro ? [NSString stringWithFormat:@"GYRO\n%s", astrMode[_iGyroMode]] : @"NO\nGYRO";
-  aButtonViews[BTN_TRAYSENS].text = [NSString stringWithFormat:@"SENS\n%.1fx", (double)_afGyroSens[_iGyroSens]];
+  bLit = bLit != 0;
+  const int iLook = bLit + 2 * (int)lroundf(_fOpacity * 100.0f);
+  if (bRunLit == iLook) return;
+  bRunLit = iLook;
+  runMarker.alpha = (bLit ? 1.0 : IOSTOUCH_IDLE_ALPHA) * _fOpacity;
+  runMarker.backgroundColor = bLit ? [UIColor colorWithRed:0.47 green:0.78 blue:1.0 alpha:0.55]
+                                   : [UIColor colorWithWhite:0.0 alpha:0.35];
+  runMarker.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:(bLit ? 0.85 : 0.45)].CGColor;
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  runChevrons.strokeColor = [UIColor colorWithWhite:1.0 alpha:(bLit ? 1.0 : 0.85)].CGColor;
+  runLink.strokeColor = bLit ? [UIColor colorWithRed:0.47 green:0.78 blue:1.0 alpha:0.95].CGColor
+                             : [UIColor colorWithWhite:1.0 alpha:0.45].CGColor;
+  runLink.opacity = (bLit ? 1.0 : IOSTOUCH_IDLE_ALPHA) * _fOpacity;
+  [CATransaction commit];
 }
 
 // The frame rate asked of the screen: a display link that does nothing but
@@ -3253,8 +3554,19 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
 // Which buttons show and how; the tray and the FPS readout
 - (void)refreshButtonLooks
 {
-  [self refreshGyroLabels];
   [self refreshMaxFpsLabel];
+  if (fLookLabel != _fLookScale) {
+    fLookLabel = _fLookScale;
+    aButtonViews[BTN_TRAYLOOK].text = [NSString stringWithFormat:@"LOOK\n%gx", (double)_fLookScale];
+  }
+  // The tray's buttons placed again as LEVEL comes and goes (the core moved
+  // them), with the backing
+  if (bTrayLevelShown != _bTrayLevelPlaced) {
+    bTrayLevelShown = _bTrayLevelPlaced;
+    for (int i = BTN_TRAYFIRST; i <= BTN_TRAYLAST; i++) aButtonViews[i].center = CGPointMake(_aButtons[i].x, _aButtons[i].y);
+    trayBack.frame = CGRectMake(_rTrayBack.x0, _rTrayBack.y0, _rTrayBack.x1 - _rTrayBack.x0, _rTrayBack.y1 - _rTrayBack.y0);
+  }
+  [self refreshCheat];
   if (fOpacityLabel != _fOpacity) {
     fOpacityLabel = _fOpacity;
     aButtonViews[BTN_TRAYOPACITY].text = [NSString stringWithFormat:@"OPACITY\n%d%%", (int)lroundf(_fOpacity * 100.0f)];
@@ -3272,7 +3584,6 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     }
     if (opacityBack.hidden == bShow) opacityBack.hidden = !bShow;
   }
-  const int bGyro = IOSTouch_GyroAvailable();
   for (int i = 0; i < IOSTOUCH_NUM_BUTTONS; i++) {
     UILabel *l = aButtonViews[i];
     const int bShown = IOSTouch_IsShown(i);
@@ -3285,24 +3596,37 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     }
     l.backgroundColor = [UIColor colorWithWhite:(bHeld ? 1.0 : 0.0) alpha:(bHeld ? 0.30 : 0.22)];
     // The iOS keyboard up (on the tray's keyboard), the FPS readout being on
-    // (on the tray's FPS), tilt aiming being on (on the tray's GYRO), always
-    // run (on RUN) and the automap (on MAP) stand out in yellow, at full
-    // strength
+    // (on the tray's FPS), Always Run (on the tray's ALWAYS RUN) and the
+    // automap (on MAP) stand out in yellow, at full strength; the cheat on
+    // (CHEAT, the tray's CHEAT and LEVEL) and noclip (USE) in its gold
     const int bOn = (i == BTN_TRAYKEYS && _hud.bKeyboard)
                     || (i == BTN_TRAYFPS && _bShowFps)
-                    || (i == BTN_TRAYGYRO && bGyro && _iGyroMode != IOSTOUCH_GYRO_OFF)
-                    || (i == BTN_RUN && _hud.bRunOn)
+                    || (i == BTN_TRAYRUN && _hud.bRunOn)
                     || (i == BTN_MAP && _hud.bAutomap);
+    const int bGold = ((i == BTN_CHEAT || i == BTN_TRAYCHEAT || i == BTN_TRAYLEVEL) && _bCheatOn)
+                      || (i == BTN_USE && IOSTouch_CheatNoclip());
     const int bTray = IOSTouch_IsTrayButton(i); // only there while the tray is open
-    CGFloat alpha = (bHeld || bOn || bTray) ? 1.0 : IOSTOUCH_IDLE_ALPHA;
-    if (i == BTN_TRAYGYRO && !bGyro) alpha *= 0.45;                                       // no gyro here
-    if (i == BTN_TRAYSENS && (!bGyro || _iGyroMode == IOSTOUCH_GYRO_OFF)) alpha *= 0.45; // ...or it's off
+    CGFloat alpha = (bHeld || bOn || bGold || bTray) ? 1.0 : IOSTOUCH_IDLE_ALPHA;
     if (!bTray) alpha *= _fOpacity; // (OPACITY: the controls; the tray at full)
     l.alpha = alpha;
-    if (i != BTN_FIRE) {
+    if (bGold) {
+      l.layer.borderColor = IOSTouch_CheatGold(0.95).CGColor;
+      if (!bHeld && i == BTN_CHEAT) l.backgroundColor = IOSTouch_CheatGold(0.28);
+    }
+    else if (i != BTN_FIRE) {
       l.layer.borderColor = bOn ? [UIColor colorWithRed:1.0 green:0.85 blue:0.3 alpha:0.95].CGColor
                                 : [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
     }
+  }
+  // the small label under USE while the cheat can make it go through walls
+  {
+    const int bShow = IOSTouch_IsShown(BTN_USE) && IOSTouch_CheatCanAct();
+    if (bShow) {
+      noclipLabel.text = IOSTouch_CheatNoclip() ? @"NOCLIP ON" : @"HOLD: NOCLIP";
+      noclipLabel.alpha = _fOpacity;
+      noclipLabel.center = CGPointMake(_aButtons[BTN_USE].x, _aButtons[BTN_USE].y + _aButtons[BTN_USE].radius + 8.0);
+    }
+    if (noclipLabel.hidden == bShow) noclipLabel.hidden = !bShow;
   }
   if (trayBack.hidden == _bTrayOpen) trayBack.hidden = !_bTrayOpen;
   // the version, with the tray
@@ -3315,20 +3639,20 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
   if (versionLabel.hidden == _bTrayOpen) versionLabel.hidden = !_bTrayOpen;
 
   // The FPS readout (not while the open tray lies over it), and the app's
-  // settings when it, or tilt aiming's mode or sensitivity, was changed
+  // settings when it, the look speed or CHEAT's showing was changed
   const int bFpsShown = _bShowFps && !(_bTrayOpen && IOSTouch_FpsUnderTray());
   if (fpsLabel.hidden == bFpsShown) fpsLabel.hidden = !bFpsShown;
   if (bFpsSaved != _bShowFps) {
     bFpsSaved = _bShowFps;
     [[NSUserDefaults standardUserDefaults] setBool:(_bShowFps ? YES : NO) forKey:IOSTOUCH_FPS_DEFAULTS_KEY];
   }
-  if (iGyroModeSaved != _iGyroMode) {
-    iGyroModeSaved = _iGyroMode;
-    [[NSUserDefaults standardUserDefaults] setInteger:_iGyroMode forKey:IOSTOUCH_GYRO_DEFAULTS_KEY];
+  if (fLookSaved != _fLookScale) {
+    fLookSaved = _fLookScale;
+    [[NSUserDefaults standardUserDefaults] setFloat:_fLookScale forKey:IOSTOUCH_LOOKSCALE_DEFAULTS_KEY];
   }
-  if (iGyroSensSaved != _iGyroSens) {
-    iGyroSensSaved = _iGyroSens;
-    [[NSUserDefaults standardUserDefaults] setFloat:_afGyroSens[_iGyroSens] forKey:IOSTOUCH_GYRO_SENS_DEFAULTS_KEY];
+  if (bCheatSaved != _bShowCheat) {
+    bCheatSaved = _bShowCheat;
+    [[NSUserDefaults standardUserDefaults] setBool:(_bShowCheat ? YES : NO) forKey:IOSTOUCH_CHEAT_DEFAULTS_KEY];
   }
   if (iFpsLabel != _iFpsShown) {
     iFpsLabel = _iFpsShown;
@@ -3345,8 +3669,12 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
   [self setRing:menuRing progress:_fMenuRing];
   [self setRing:fpsRing progress:_fFpsRing];
   [self setRing:opacityRing progress:_fOpacityRing];
+  [self setRing:lookRing progress:_fLookRing];
+  [self setRing:cheatRing progress:_fCheatRing];
+  [self setRing:noclipRing progress:_fNoclipRing];
   [self setRing:aWheelRings[0] progress:_afWheelRing[0]];
   [self syncWheel];
+  [self syncLevels];
   [self refreshMessage];
 }
 
@@ -3807,7 +4135,7 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self endTouches:touches cancelled:0]; }
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self endTouches:touches cancelled:1]; }
 
-// Once per frame while shown: the NEXT WPN, QUICK SAVE, QUICK LOAD, MENU,
+// Once per frame while shown: the NEXT WPN, SAVE, LOAD, MENU,
 // FPS and OPACITY holds, the weapon wheel, the lit buttons and the FPS
 // readout
 - (void)tick
@@ -3815,7 +4143,9 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
   const double now = CACurrentMediaTime();
   const int bTrayWasOpen = _bTrayOpen;
   const int iFpsWas = _iFpsShown;
-  const int iShownWas = (_hud.bNoSaves != 0) * 16 + (_hud.bRunOn != 0) * 32 + (_hud.bAutomap != 0) * 64 + (_hud.bKeyboard != 0) * 128;
+  const int iShownWas = (_hud.bNoSaves != 0) * 16 + (_hud.bRunOn != 0) * 32 + (_hud.bAutomap != 0) * 64 + (_hud.bKeyboard != 0) * 128
+                        + _bShowCheat * 256 + _bCheatOn * 512 + _bNoclip * 1024 + IOSTouch_CheatCanAct() * 2048
+                        + _bTrayLevelPlaced * 4096 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384;
   IOSTouch_TickHolds(now);
   tLastTick = now;
   [self refreshMessage];
@@ -3825,8 +4155,18 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
   [self setRing:menuRing progress:_fMenuRing];
   [self setRing:fpsRing progress:_fFpsRing];
   [self setRing:opacityRing progress:_fOpacityRing];
+  [self setRing:lookRing progress:_fLookRing];
+  [self setRing:cheatRing progress:_fCheatRing];
+  [self setRing:noclipRing progress:_fNoclipRing];
   [self setRing:aWheelRings[0] progress:_afWheelRing[0]];
   [self syncWheel]; // (a hold may have opened the weapon wheel, or the game closed it)
+  [self syncLevels]; // (the cheat's list closes as LEVEL goes)
+  // LOOK held: back to 1x (a thump)
+  if (ctLookResetsFelt != _ctLookResets) {
+    ctLookResetsFelt = _ctLookResets;
+    [fpsThump impactOccurred];
+    [self refreshButtonLooks];
+  }
   // OPACITY held: back to 100% (a thump, the controls, the slider)
   if (ctOpacityResetsFelt != _ctOpacityResets) {
     ctOpacityResetsFelt = _ctOpacityResets;
@@ -3843,13 +4183,241 @@ static void IOSTouch_DrawWheelTheme(const IOSTouchWheelTheme *t, CGPoint c, doub
     [self applyMaxFps];
     [self refreshButtonLooks];
   }
-  // QUICK SAVE and QUICK LOAD come and go, RUN, MAP and the keyboard light,
-  // the tray opens, the readout counts
-  const int iShownNow = (_hud.bNoSaves != 0) * 16 + (_hud.bRunOn != 0) * 32 + (_hud.bAutomap != 0) * 64 + (_hud.bKeyboard != 0) * 128;
+  // SAVE and LOAD come and go, ALWAYS RUN, MAP and the keyboard light, the
+  // cheat changes (CHEAT, its picture, LEVEL, noclip), the tray opens, the
+  // readout counts
+  const int iShownNow = (_hud.bNoSaves != 0) * 16 + (_hud.bRunOn != 0) * 32 + (_hud.bAutomap != 0) * 64 + (_hud.bKeyboard != 0) * 128
+                        + _bShowCheat * 256 + _bCheatOn * 512 + _bNoclip * 1024 + IOSTouch_CheatCanAct() * 2048
+                        + _bTrayLevelPlaced * 4096 + _bCheatIconNew * 8192 + (_ctCheatTicks & 255) * 16384;
   if (_bTrayOpen != bTrayWasOpen || _iFpsShown != iFpsWas || iShownNow != iShownWas
       || opacityBack.hidden == (_bOpacityOpen && _bTrayOpen)) {
     [self refreshButtonLooks];
+    [self refreshStick];
   }
+}
+
+// ------------------------------------------------------------ the cheat
+
+// CHEAT: BJ's face from the game's own status bar (IOSGame.cpp hands it
+// over), in colour while the cheat is on, grey while it's off; its hold's
+// ring. USE: the cheat's noclip ring, and a small red label under it. The
+// tray's LEVEL in the cheat's gold.
+- (void)makeCheat
+{
+  UILabel *b = aButtonViews[BTN_CHEAT];
+  const CGFloat r = _aButtons[BTN_CHEAT].radius;
+  b.text = @"CHEAT"; // (until the picture comes; none: the word stays)
+  b.font = IOSTouch_TrayFont(9);
+  cheatFace = [CALayer layer];
+  cheatFace.contentsGravity = kCAGravityResizeAspect;
+  cheatFace.magnificationFilter = kCAFilterNearest;
+  cheatFace.frame = CGRectMake(r - 15, r - 17, 30, 34);
+  cheatFace.hidden = YES;
+  [b.layer addSublayer:cheatFace];
+  cheatRing = IOSTouch_MakeHoldRing(r);
+  cheatRing.strokeColor = IOSTouch_CheatGold(0.95).CGColor;
+  [b.layer addSublayer:cheatRing];
+  noclipRing = IOSTouch_MakeHoldRing(_aButtons[BTN_USE].radius);
+  noclipRing.strokeColor = IOSTouch_CheatGold(0.95).CGColor;
+  [aButtonViews[BTN_USE].layer addSublayer:noclipRing];
+  noclipLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 90, 13)];
+  noclipLabel.textAlignment = NSTextAlignmentCenter;
+  noclipLabel.font = IOSTouch_TrayFont(10);
+  noclipLabel.textColor = [UIColor colorWithRed:1.0 green:0.35 blue:0.3 alpha:0.95];
+  noclipLabel.shadowColor = [UIColor colorWithWhite:0.0 alpha:0.7];
+  noclipLabel.shadowOffset = CGSizeMake(0, 1);
+  noclipLabel.userInteractionEnabled = NO;
+  noclipLabel.hidden = YES;
+  [self addSubview:noclipLabel];
+  aButtonViews[BTN_TRAYLEVEL].textColor = IOSTouch_CheatGold(1.0);
+  aButtonViews[BTN_TRAYCHEAT].textColor = IOSTouch_CheatGold(1.0);
+  cheatThump = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+  iCheatLook = -1;
+  ctCheatTicksFelt = _ctCheatTicks;
+  _bShowCheat = [[NSUserDefaults standardUserDefaults] boolForKey:IOSTOUCH_CHEAT_DEFAULTS_KEY] ? 1 : 0;
+  bCheatSaved = _bShowCheat;
+}
+
+// CHEAT's picture as the cheat is (made into images once the game handed
+// it over), and a thump for each switch
+- (void)refreshCheat
+{
+  if (_bCheatIconNew) {
+    _bCheatIconNew = 0;
+    cheatImages[0] = _pubCheatIconGrey ? CFBridgingRelease(IOSTouch_MakeIconImage(_pubCheatIconGrey, _iCheatIconW, _iCheatIconH)) : nil;
+    cheatImages[1] = _pubCheatIcon ? CFBridgingRelease(IOSTouch_MakeIconImage(_pubCheatIcon, _iCheatIconW, _iCheatIconH)) : nil;
+    iCheatLook = -1;
+  }
+  const int iLook = _bCheatOn ? 1 : 0;
+  if (iLook != iCheatLook) {
+    iCheatLook = iLook;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    cheatFace.contents = cheatImages[iLook];
+    cheatFace.opacity = iLook ? 1.0f : 0.75f;
+    cheatFace.hidden = (cheatImages[iLook] == nil);
+    [CATransaction commit];
+    aButtonViews[BTN_CHEAT].textColor = cheatImages[iLook] ? [UIColor clearColor] : [UIColor colorWithWhite:1.0 alpha:0.85];
+  }
+  if (ctCheatTicksFelt != _ctCheatTicks) {
+    ctCheatTicksFelt = _ctCheatTicks;
+    [cheatThump impactOccurred];
+  }
+}
+
+// ------------------------------------------------------- the cheat's levels
+// The tray's LEVEL opens this over the game (which holds still meanwhile):
+// the game's own levels in order (the floor, or its name; the episode and
+// map under it), the one being played ticked. A tap on one goes there; the
+// X, or a touch anywhere off the panel, closes it. In the cheat's gold.
+
+- (void)makeLevelPanel
+{
+  levelPanel = [[IOSTouchLevelPanel alloc] initWithFrame:CGRectZero];
+  levelPanel.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.82];
+  levelPanel.layer.cornerRadius = 18.0;
+  levelPanel.layer.borderWidth = 1.5;
+  levelPanel.layer.borderColor = IOSTouch_CheatGold(0.8).CGColor;
+  levelPanel.clipsToBounds = YES;
+  levelPanel.hidden = YES;
+  levelTitle = [[UILabel alloc] initWithFrame:CGRectZero];
+  levelTitle.text = @"LEVEL";
+  levelTitle.font = IOSTouch_TrayFont(17);
+  levelTitle.textColor = IOSTouch_CheatGold(1.0);
+  levelTitle.adjustsFontSizeToFitWidth = YES;
+  levelTitle.minimumScaleFactor = 0.6;
+  [levelPanel addSubview:levelTitle];
+  levelClose = [UIButton buttonWithType:UIButtonTypeSystem];
+  UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:15 weight:UIImageSymbolWeightBold];
+  UIImage *x = [UIImage systemImageNamed:@"xmark" withConfiguration:cfg];
+  if (x) [levelClose setImage:x forState:UIControlStateNormal];
+  else [levelClose setTitle:@"X" forState:UIControlStateNormal];
+  levelClose.tintColor = [UIColor colorWithWhite:1.0 alpha:0.85];
+  [levelClose addTarget:self action:@selector(closeLevelsTapped) forControlEvents:UIControlEventTouchUpInside];
+  [levelPanel addSubview:levelClose];
+  levelTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+  levelTable.backgroundColor = [UIColor clearColor];
+  levelTable.separatorColor = [UIColor colorWithWhite:1.0 alpha:0.12];
+  levelTable.indicatorStyle = UIScrollViewIndicatorStyleWhite;
+  levelTable.dataSource = self;
+  levelTable.delegate = self;
+  [levelPanel addSubview:levelTable];
+  [self addSubview:levelPanel];
+  aLevelNames = @[];
+  aLevelDetails = @[];
+  iLevelNow = 0;
+}
+
+// Middle of the screen, inside the safe area, as tall as it allows
+- (void)placeLevelPanel
+{
+  const CGRect b = self.bounds;
+  const UIEdgeInsets in = self.safeAreaInsets;
+  const CGFloat w = fmin(440.0, b.size.width - in.left - in.right - 40.0);
+  const CGFloat h = fmax(120.0, b.size.height - fmax(in.top, 8.0) - fmax(in.bottom, 8.0) - 16.0);
+  const CGFloat left = in.left + (b.size.width - in.left - in.right - w) * 0.5;
+  levelPanel.frame = CGRectMake(left, fmax(in.top, 8.0) + 8.0, w, h);
+  levelTitle.frame = CGRectMake(18, 10, w - 70, 26);
+  levelClose.frame = CGRectMake(w - 46, 4, 42, 38);
+  levelTable.frame = CGRectMake(0, 46, w, h - 46);
+}
+
+// The panel as the core says: shown (the levels read from the game) while
+// the list is open, hidden once it closes
+- (void)syncLevels
+{
+  if (_bLevelListOpen && levelPanel.hidden) {
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    NSMutableArray<NSString *> *details = [NSMutableArray array];
+    for (int i = 1; i <= _hud.ctLevels; i++) {
+      char strName[128], strDetail[128];
+      if (!IOSGame_LevelInfo(i, strName, sizeof(strName), strDetail, sizeof(strDetail))) break;
+      NSString *name = [NSString stringWithUTF8String:strName];
+      NSString *detail = [NSString stringWithUTF8String:strDetail];
+      // (the game's names, in its own 8-bit letters)
+      if (!name) name = [NSString stringWithCString:strName encoding:NSWindowsCP1252StringEncoding];
+      if (!detail) detail = [NSString stringWithCString:strDetail encoding:NSWindowsCP1252StringEncoding];
+      [names addObject:(name ?: @"")];
+      [details addObject:(detail ?: @"")];
+    }
+    if (names.count == 0) {
+      IOSTouch_CloseLevelList();
+      IOSTouch_Message("No levels found");
+      return;
+    }
+    aLevelNames = names;
+    aLevelDetails = details;
+    iLevelNow = _hud.iLevelNow;
+    levelTitle.text = [NSString stringWithFormat:@"LEVEL  (%d)", (int)names.count];
+    [self placeLevelPanel];
+    [levelTable reloadData];
+    levelPanel.hidden = NO;
+    [self bringSubviewToFront:levelPanel];
+    [levelTable layoutIfNeeded];
+    // the level being played in view
+    if (iLevelNow >= 1 && iLevelNow <= (int)names.count) {
+      [levelTable scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:iLevelNow - 1 inSection:0]
+                        atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+    }
+    else {
+      [levelTable setContentOffset:CGPointZero animated:NO];
+    }
+    [self refreshButtonLooks];
+    [self refreshStick];
+  }
+  else if (!_bLevelListOpen && !levelPanel.hidden) {
+    levelPanel.hidden = YES;
+  }
+}
+
+- (void)closeLevelsTapped
+{
+  IOSTouch_CloseLevelList();
+  [self syncLevels];
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+  return (NSInteger)aLevelNames.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"level"];
+  if (!cell) {
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"level"];
+    cell.backgroundColor = [UIColor clearColor];
+    cell.textLabel.font = IOSTouch_TrayFont(16);
+    cell.textLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.92];
+    cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
+    cell.detailTextLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.5];
+    cell.tintColor = IOSTouch_CheatGold(1.0);
+    UIView *sel = [[UIView alloc] init];
+    sel.backgroundColor = IOSTouch_CheatGold(0.3);
+    cell.selectedBackgroundView = sel;
+  }
+  const NSInteger row = indexPath.row;
+  if (row < 0 || row >= (NSInteger)aLevelNames.count) return cell;
+  // the number in the cheat's gold, then the name
+  UIFont *font = IOSTouch_TrayFont(16);
+  NSMutableAttributedString *text = [[NSMutableAttributedString alloc]
+      initWithString:[NSString stringWithFormat:@"%d.  ", (int)row + 1]
+          attributes:@{ NSFontAttributeName: font, NSForegroundColorAttributeName: IOSTouch_CheatGold(1.0) }];
+  [text appendAttributedString:[[NSAttributedString alloc] initWithString:aLevelNames[row]
+                                  attributes:@{ NSFontAttributeName: font,
+                                                NSForegroundColorAttributeName: [UIColor colorWithWhite:1.0 alpha:0.92] }]];
+  cell.textLabel.attributedText = text;
+  cell.detailTextLabel.text = aLevelDetails[row];
+  cell.accessoryType = (row + 1 == iLevelNow) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+  return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  [tableView deselectRowAtIndexPath:indexPath animated:NO];
+  [runTick selectionChanged];
+  IOSTouch_PickLevel((int)indexPath.row + 1);
+  [self syncLevels];
 }
 
 - (void)resetAll
@@ -3942,15 +4510,6 @@ static int IOSTouch_UpdateOverlay(void *pSDLWindow, int iMode, const IOSTouchHud
     [_pOverlay tick];
   }
 
-  // Tilt aiming, after the frame's touches came in: only while the overlay
-  // is up and the app in front (the samples' side from the screen's)
-  const int bHadGyro = IOSTouch_GyroAvailable();
-  IOSTouch_GyroFrame(!_pOverlay.hidden && _pOverlay.superview != nil,
-                     [UIApplication sharedApplication].applicationState == UIApplicationStateActive,
-                     IOSTouch_ScreenSide(_pOverlay), CACurrentMediaTime());
-  if (IOSTouch_GyroAvailable() != bHadGyro) {
-    [_pOverlay refreshButtonLooks]; // iOS refused the motion data: the tray's GYRO says NO GYRO
-  }
   return iRequests;
 }
 
@@ -3970,7 +4529,6 @@ void IOSTouch_Hide(void)
 {
   @autoreleasepool {
     if (_iMode != IOSTOUCH_HIDDEN) IOSTouch_SetMode(IOSTOUCH_HIDDEN);
-    IOSTouch_GyroRun(0); // no motion updates while loading or in the background
   }
 }
 

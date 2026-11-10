@@ -461,8 +461,8 @@ int main(int argc, char* argv[])
 	SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 	// SDL makes the phone's accelerometer joystick 0 unless told not to;
 	// ECWolf opened it and read gravity as a stick held to one side: the
-	// view turned on its own whenever the phone wasn't flat. (Tilt aiming
-	// is the overlay's GYRO; real game controllers still work.)
+	// view turned on its own whenever the phone wasn't flat. (Wolf3D has
+	// no tilt aiming, the owner's call; real game controllers still work.)
 	SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
 	IOS_AppInit();
 	// (ECWolf also looks for game files in the folder it runs in)

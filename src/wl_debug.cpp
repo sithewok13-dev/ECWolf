@@ -791,3 +791,15 @@ void DoDebugKey(int player, const DebugCmd &cmd)
 			break;
 	}
 }
+
+#ifdef ECWOLF_TOUCH
+// The touch controls' sithewok cheat (ios/IOSGame.cpp): every weapon and
+// the ammo, as the debug keys give them, the weapon in hand kept in hand
+void IOSCheat_GiveAll(player_t &player)
+{
+	AWeapon *const ready = player.ReadyWeapon;
+	AWeapon *const pending = player.PendingWeapon;
+	GiveAllWeaponsAndAmmo(player);
+	player.PendingWeapon = (pending && pending != WP_NOCHANGE) ? pending : (ready ? WP_NOCHANGE : player.PendingWeapon);
+}
+#endif

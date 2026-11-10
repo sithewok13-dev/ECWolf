@@ -210,6 +210,10 @@ public:
 
 	static LevelInfo &Find(const char* level);
 	static LevelInfo &FindByNumber(unsigned int num);
+#ifdef ECWOLF_TOUCH
+	// (the touch controls' list of levels) its MAPINFO name, NULL: the map's own
+	const FString *GetMapInfoName() const { return UseMapInfoName ? &Name : NULL; }
+#endif
 
 protected:
 	friend class LevelInfoBlockParser;
