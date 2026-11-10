@@ -75,7 +75,13 @@ int IOSTouch_Update(void *pSDLWindow, int iMode, const IOSTouchHud *pHud, unsign
   _iRequests = 0;
   _ulRigFrames = ulFramesDrawn;
   if (pHud) _hud = *pHud;
-  if (!_bRigLaidOut) IOSTouchRig_Layout();
+  if (!_bRigLaidOut || IOSTouch_StatusTopMoved()) {
+    IOSTouchRig_Layout();
+    printf("rig: layout: status bar top %.1f, FIRE %.1f,%.1f r %.0f, USE %.1f,%.1f r %.0f\n", _hud.fStatusTop * RIG_H,
+           _aButtons[BTN_FIRE].x, _aButtons[BTN_FIRE].y, _aButtons[BTN_FIRE].radius, _aButtons[BTN_USE].x, _aButtons[BTN_USE].y,
+           _aButtons[BTN_USE].radius);
+    fflush(stdout);
+  }
   if (iMode != _iMode) IOSTouchRig_SetMode(iMode);
   if (iMode != IOSTOUCH_HIDDEN) {
     const double now = CACurrentMediaTime();

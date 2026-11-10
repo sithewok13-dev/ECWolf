@@ -466,6 +466,16 @@ static void IOSTouch_PlaceTray(int iShown)
   _rTrayKeysBack.x0 = _fTrayKeysX - IOSTOUCH_TRAY_STEP - 26;
 }
 
+static IOSTouchHud _hud;                   // the latest HUD state
+
+// The status bar's top the last layout kept FIRE and USE above
+// (IOSTouchHud.fStatusTop): a change lays out again
+static float _fLaidStatusTop = 0.0f;
+static int IOSTouch_StatusTopMoved(void)
+{
+  return fabsf(_hud.fStatusTop - _fLaidStatusTop) > 0.002f;
+}
+
 // The screen's usable edges (points), as the last layout had them: the run
 // marker keeps inside them
 static double _fSafeLeft = 8.0, _fSafeTop = 8.0, _fSafeRight = 8.0;
@@ -486,9 +496,14 @@ static void IOSTouch_LayoutButtons(double W, double H, double inLeft, double inT
   const double bottom = H - fmax(inBottom, 8.0);
 
   // FIRE in the corner, above the home indicator (further in without side
-  // insets: a screen with square corners)
+  // insets: a screen with square corners) and above the game's status bar
+  // (in the 3D view's lower right), but no higher than the middle
   const double FR = _aButtons[BTN_FIRE].radius;
-  const double fireX = right - (inRight < 20.0 ? 100 : 76), fireY = bottom - 58;
+  const double fireX = right - (inRight < 20.0 ? 100 : 76);
+  double fireY = bottom - 58;
+  _fLaidStatusTop = _hud.fStatusTop;
+  if (_hud.fStatusTop > 0.3f && _hud.fStatusTop < 1.0f)
+    fireY = fmax(fmin(fireY, _hud.fStatusTop * H - 8 - FR), H * 0.5);
   _aButtons[BTN_FIRE].x = fireX;
   _aButtons[BTN_FIRE].y = fireY;
 
@@ -692,7 +707,6 @@ static double _fStickOriginX = 0.0, _fStickOriginY = 0.0; // where the stick's t
 static float _fStickX = 0.0f, _fStickY = 0.0f;           // -1..1 of the radius, screen axes
 static int _iMode = IOSTOUCH_HIDDEN;
 static int _iRequests = 0;                 // IOSTOUCH_REQ_* not handed out yet
-static IOSTouchHud _hud;                   // the latest HUD state
 static int _bTrayOpen = 0;                 // MENU's tray
 static int _bShowFps = 0;                  // the FPS readout (the view keeps it in the app's settings)
 // The frame rate asked of the screen: always 60 in Wolf3D (the owner's
@@ -4657,7 +4671,7 @@ static int IOSTouch_UpdateOverlay(void *pSDLWindow, int iMode, const IOSTouchHud
   if (iMode != IOSTOUCH_HIDDEN) {
     // Turning the phone the other way up changes neither the size nor the
     // insets, but moves the cutout to the other side: lay out again
-    if (IOSTouch_CutoutMayBeRight(_pOverlay) != _iLayoutCutoutRight) {
+    if (IOSTouch_CutoutMayBeRight(_pOverlay) != _iLayoutCutoutRight || IOSTouch_StatusTopMoved()) {
       [_pOverlay setNeedsLayout];
     }
     [_pOverlay tick];

@@ -47,6 +47,8 @@
 #include "r_sprites.h"
 #include "v_palette.h"
 #include "v_video.h"
+#include "textures/textures.h"
+#include "colormatcher.h"
 #include "thingdef/thingdef.h"
 #include "g_shared/a_playerpawn.h"
 
@@ -67,8 +69,11 @@ extern int viewshift;
 // gives up when its photos can't be taken for CAM_GIVE_UP
 #define CAM_SHOW_TIME 0.8
 #define CAM_GIVE_UP 4.0
-// Selfies: the nearest CAM_GROUP_MAX enemies within CAM_GROUP_RANGE
-#define CAM_GROUP_RANGE 24.0
+// Selfies: the nearest CAM_GROUP_MAX enemies where the player is: in his
+// area (or one joined to it by open doors) within CAM_AREA_RANGE, or in
+// sight within CAM_SIGHT_RANGE
+#define CAM_AREA_RANGE 14.0
+#define CAM_SIGHT_RANGE 20.0
 #define CAM_GROUP_MAX 12
 // The player's eyes above the floor; how near the camera keeps to a wall
 #define CAM_EYE 0.5
@@ -511,8 +516,19 @@ static double FreeAhead(V2 from, double yaw, double max)
 	return ClearDist(from, from + Fwd(yaw) * max);
 }
 
-// The living enemies, nearest first
-static void FindPeople(double range, size_t max)
+// Whether a is where the player is: in his area or one joined to it by
+// open doors (ECWolf's sound zones), within CAM_AREA_RANGE, or in sight
+// within CAM_SIGHT_RANGE
+static bool HereWithPlayer(AActor *a, double dist)
+{
+	const MapZone *mine = Player()->mo->GetZone(), *theirs = a->GetZone();
+	if(dist <= CAM_AREA_RANGE && mine && theirs && (mine == theirs || map->CheckLink(mine, theirs, true)))
+		return true;
+	return dist <= CAM_SIGHT_RANGE && ClearLine(eyeAt, PosOf(a));
+}
+
+// The living enemies, nearest first (here: only those where the player is)
+static void FindPeople(double range, size_t max, bool here = false)
 {
 	people.clear();
 	for(AActor::Iterator it = AActor::GetIterator();it.Next();)
@@ -524,7 +540,7 @@ static void FindPeople(double range, size_t max)
 		memset(&q, 0, sizeof(q));
 		q.act = a;
 		q.dist = Len(PosOf(a) - eyeAt);
-		if(q.dist > range)
+		if(q.dist > range || (here && !HereWithPlayer(a, q.dist)))
 			continue;
 		people.push_back(q);
 	}
@@ -791,6 +807,268 @@ static void HideOthers()
 	}
 }
 
+// ------------------------------------------------------------ BJ in his selfies
+
+// He holds the phone: his status-bar face (the player's own data: healthy,
+// the grin, Spear's golden eyes) big in a bottom corner, scaled up a whole
+// number of times (nearest), the background keyed out, on shoulders in his
+// grey shirt drawn in the same pixels (the victory run's shirt), cropped by
+// the frame's edges. Drawn over the photo view's 3D view each frame (the
+// screen is drawn afresh every frame: nothing of the game changes).
+#define SELF_W 24
+#define SELF_H 32
+#define SELF_NECK0 4  // (the neck's columns at the picture's bottom)
+#define SELF_NECK1 20
+#define SELF_LEFT -14 // (the shirt's columns, past the picture's sides)
+#define SELF_RIGHT 37
+#define SELF_ROWS 26  // (rows below the picture, at most)
+
+struct SelfPic
+{
+	bool ok;
+	BYTE px[SELF_H][SELF_W];
+	bool on[SELF_H][SELF_W];
+};
+static const char *const selfFaces[] = { "STFST00", "STFEVL0", "STFGOD0", "STFST01", "STFST02" };
+static const int selfFaceWeights[] = { 10, 8, 8, 3, 3 };
+#define SELF_FACES (int)(sizeof(selfFaces) / sizeof(selfFaces[0]))
+static SelfPic selfPics[SELF_FACES];
+static bool selfLooked[SELF_FACES];
+static BYTE shirtLight, shirtMid, shirtDark, shirtDeep, shirtLine;
+
+struct SelfShot
+{
+	bool on;
+	int face;    // selfFaces[]
+	int k;       // view pixels a picture pixel
+	int x0, y0;  // the picture's top left in the view
+	bool flip;
+	int side;    // -1: bottom left, 1: bottom right
+};
+static SelfShot self;
+
+static bool LoadSelfPic(int i)
+{
+	SelfPic &f = selfPics[i];
+	if(selfLooked[i])
+		return f.ok;
+	selfLooked[i] = true;
+	f.ok = false;
+	const FTextureID id = TexMan.CheckForTexture(selfFaces[i], FTexture::TEX_Any);
+	FTexture *tex = id.isValid() ? TexMan[id] : NULL;
+	if(!tex || tex->GetWidth() != SELF_W || tex->GetHeight() != SELF_H)
+		return false;
+	int raw[SELF_H][SELF_W];
+	for(int y = 0;y < SELF_H;y++)
+		for(int x = 0;x < SELF_W;x++)
+			raw[y][x] = -1;
+	for(int x = 0;x < SELF_W;x++)
+	{
+		const FTexture::Span *sp;
+		const BYTE *col = tex->GetColumn(x, &sp);
+		for(;sp && sp->Length;sp++)
+			for(int y = sp->TopOffset;y < sp->TopOffset + sp->Length && y < SELF_H;y++)
+				raw[y][x] = col[y];
+	}
+	// the background: the colours most of the border is (the panel's grey,
+	// the blue line over it), and on the border anything near them, keyed
+	// out from the edges inwards
+	int count[256] = { 0 }, border = 0;
+	for(int y = 0;y < SELF_H;y++)
+		for(int x = 0;x < SELF_W;x++)
+			if((y == 0 || x == 0 || y == SELF_H - 1 || x == SELF_W - 1) && raw[y][x] >= 0)
+			{
+				count[raw[y][x]]++;
+				border++;
+			}
+	bool bg[256];
+	for(int c = 0;c < 256;c++)
+		bg[c] = count[c] * 20 >= border && count[c] > 0;
+	bool nearBg[256];
+	for(int c = 0;c < 256;c++)
+	{
+		nearBg[c] = bg[c];
+		for(int b = 0;b < 256 && !nearBg[c];b++)
+		{
+			if(!bg[b])
+				continue;
+			const int dr = GPalette.BaseColors[c].r - GPalette.BaseColors[b].r;
+			const int dg = GPalette.BaseColors[c].g - GPalette.BaseColors[b].g;
+			const int db = GPalette.BaseColors[c].b - GPalette.BaseColors[b].b;
+			nearBg[c] = dr * dr + dg * dg + db * db < 48 * 48;
+		}
+	}
+	bool out[SELF_H][SELF_W];
+	std::vector<int> todo;
+	for(int y = 0;y < SELF_H;y++)
+		for(int x = 0;x < SELF_W;x++)
+		{
+			out[y][x] = raw[y][x] < 0;
+			const bool edge = y == 0 || x == 0 || y == SELF_H - 1 || x == SELF_W - 1;
+			if(!out[y][x] && edge && nearBg[raw[y][x]] && y < SELF_H - 1)
+			{
+				out[y][x] = true;
+				todo.push_back(y * SELF_W + x);
+			}
+		}
+	while(!todo.empty())
+	{
+		const int y = todo.back() / SELF_W, x = todo.back() % SELF_W;
+		todo.pop_back();
+		static const int dx[4] = { 1, -1, 0, 0 }, dy[4] = { 0, 0, 1, -1 };
+		for(int d = 0;d < 4;d++)
+		{
+			const int nx = x + dx[d], ny = y + dy[d];
+			if(nx < 0 || ny < 0 || nx >= SELF_W || ny >= SELF_H || out[ny][nx] || !bg[raw[ny][nx]])
+				continue;
+			out[ny][nx] = true;
+			todo.push_back(ny * SELF_W + nx);
+		}
+	}
+	int shown = 0;
+	for(int y = 0;y < SELF_H;y++)
+		for(int x = 0;x < SELF_W;x++)
+		{
+			f.on[y][x] = !out[y][x];
+			f.px[y][x] = raw[y][x] < 0 ? 0 : (BYTE)raw[y][x];
+			shown += f.on[y][x];
+		}
+	f.ok = shown > SELF_W * SELF_H / 3;
+	if(!shirtLine)
+	{
+		shirtLight = ColorMatcher.Pick(178, 178, 178);
+		shirtMid = ColorMatcher.Pick(142, 142, 142);
+		shirtDark = ColorMatcher.Pick(113, 113, 113);
+		shirtDeep = ColorMatcher.Pick(85, 85, 85);
+		shirtLine = ColorMatcher.Pick(44, 44, 44);
+	}
+	CAMLOG("self: %s %s (%d of %d shown)\n", selfFaces[i], f.ok ? "yes" : "no", shown, SELF_W * SELF_H);
+	return f.ok;
+}
+
+// This photo's BJ: which face, how big, which corner, how far off the edge
+static void PickSelf()
+{
+	self.on = false;
+	int total = 0;
+	for(int i = 0;i < SELF_FACES;i++)
+		if(LoadSelfPic(i))
+			total += selfFaceWeights[i];
+	if(total <= 0 || viewheight <= 0 || viewwidth <= 0)
+		return;
+	int r = (int)(Rand() % total);
+	self.face = 0;
+	for(int i = 0;i < SELF_FACES;i++)
+	{
+		if(!selfPics[i].ok)
+			continue;
+		if((r -= selfFaceWeights[i]) < 0)
+		{
+			self.face = i;
+			break;
+		}
+	}
+	// the face 50-80% of the view's height; shoulders showing below it
+	const double frac = RandIn(0.5, 0.8);
+	self.k = std::max(2, (int)lround(frac * viewheight / SELF_H));
+	const int shirt = 4 + (int)(Rand() % 8);
+	self.y0 = viewheight - (SELF_H + shirt) * self.k;
+	if(self.y0 < viewheight / 20)
+		self.y0 = viewheight / 20;
+	self.side = (Rand() & 1) ? 1 : -1;
+	self.flip = (Rand() & 1) != 0;
+	// up to a third of the face off the frame's edge
+	const int off = (int)(Rand() % 8);
+	self.x0 = self.side < 0 ? -off * self.k : viewwidth - (SELF_W - off) * self.k;
+	self.on = true;
+	CAMLOG("self: %s, %d x, %s, %d off the edge, %d of the shirt\n", selfFaces[self.face], self.k, self.side < 0 ? "left" : "right", off, shirt);
+}
+
+// The shirt's colour at picture pixel (x, y) (y >= SELF_H - 4), or -1:
+// none there. Shoulders sloping from the neck, a V at the collar, a light
+// rim on top, darker round the sides.
+static int ShirtAt(int x, int y)
+{
+	const int neckL = SELF_NECK0, neckR = SELF_NECK1;
+	const int dist = x < neckL ? neckL - x : x > neckR ? x - neckR : 0;
+	if(dist > 15)
+		return -1;
+	// the top of the shoulder (and, near the neck, the collar)
+	const double top = dist == 0 ? SELF_H : SELF_H - 2.5 + 0.45 * dist + 0.05 * dist * dist;
+	const int yt = (int)floor(top);
+	if(y < yt)
+		return -1;
+	// the V of the collar
+	const int mid = (neckL + neckR) / 2;
+	const int vHalf = 6 - 2 * (y - SELF_H);
+	if(dist == 0 && abs(x - mid) < vHalf)
+		return -2; // (the neck's skin)
+	if(dist == 0 && abs(x - mid) == vHalf)
+		return shirtLine;
+	// the arm's outside edge
+	if(dist == 15)
+		return shirtLine;
+	if(y == yt)
+		return shirtLine;
+	if(y == yt + 1 && dist < 11)
+		return shirtLight;
+	if(dist >= 12 || (dist == 11 && y > yt + 1))
+		return shirtDeep;
+	if(dist >= 8 || (x == mid && y >= SELF_H + 4))
+		return shirtDark;
+	return shirtMid;
+}
+
+static void DrawSelf(unsigned char *vbuf, unsigned pitch, int w, int h)
+{
+	if(!self.on || !selfPics[self.face].ok)
+		return;
+	const SelfPic &f = selfPics[self.face];
+	const int k = self.k;
+	const int u0 = std::max(SELF_LEFT, (int)floor((double)-self.x0 / k));
+	const int u1 = std::min(SELF_RIGHT, (int)ceil((double)(w - self.x0) / k));
+	const int v1 = std::min(SELF_H + SELF_ROWS, (int)ceil((double)(h - self.y0) / k));
+	for(int v = std::max(0, -self.y0 / k);v < v1;v++)
+	{
+		for(int u = u0;u < u1;u++)
+		{
+			// (the picture's own column, mirrored or not)
+			const int pu = self.flip ? SELF_W - 1 - u : u;
+			int c = -1;
+			if(v < SELF_H && pu >= 0 && pu < SELF_W && f.on[v][pu])
+				c = f.px[v][pu];
+			if(v >= SELF_H - 4)
+			{
+				const int sc = ShirtAt(pu, v);
+				if(sc == -2)
+				{
+					// the neck runs on under the picture, its bottom row's colours
+					if(v >= SELF_H && pu >= 0 && pu < SELF_W)
+						c = f.px[SELF_H - 1][pu];
+				}
+				else if(sc >= 0 && (c < 0 || v >= SELF_H - 1 || (pu < SELF_NECK0 || pu > SELF_NECK1)))
+					c = sc;
+			}
+			if(c < 0)
+				continue;
+			const int x0 = std::max(0, self.x0 + u * k), x1 = std::min(w, self.x0 + (u + 1) * k);
+			const int y0 = std::max(0, self.y0 + v * k), y1 = std::min(h, self.y0 + (v + 1) * k);
+			for(int y = y0;y < y1;y++)
+				memset(vbuf + (size_t)y * pitch + x0, c, x1 > x0 ? x1 - x0 : 0);
+		}
+	}
+}
+
+// The view turned towards BJ's side, so the group stands clear of him
+static void SelfShift()
+{
+	if(!self.on || viewwidth <= 0)
+		return;
+	const int edge = self.side < 0 ? self.x0 + SELF_W * self.k : viewwidth - self.x0;
+	const double frac = std::min(0.3, (double)edge / viewwidth * 0.5);
+	cam.yaw += -self.side * atan(2 * frac * TanH());
+}
+
 static bool Pose()
 {
 	int t = PickTheme(people.size());
@@ -798,6 +1076,7 @@ static bool Pose()
 	{
 		for(size_t i = 0;i < people.size();i++)
 			people[i].posed = false;
+		cam.yaw = groupYaw;
 		Theme(t);
 		size_t posed = 0;
 		for(size_t i = 0;i < people.size();i++)
@@ -805,6 +1084,8 @@ static bool Pose()
 		if(posed >= std::min<size_t>(people.size(), (size_t)themeLeast[t]))
 		{
 			lastTheme = t;
+			PickSelf();
+			SelfShift();
 			HideOthers();
 			CAMLOG("selfie %s: %d of %d posed, yaw %.0f, room %.1f\n", themeNames[t], (int)posed, (int)people.size(),
 				cam.yaw * 180 / CAM_PI, groupRoom);
@@ -817,7 +1098,7 @@ static bool Pose()
 
 static bool SelfieBegin()
 {
-	FindPeople(CAM_GROUP_RANGE, CAM_GROUP_MAX);
+	FindPeople(CAM_SIGHT_RANGE, CAM_GROUP_MAX, true);
 	if(people.empty())
 	{
 		cantWhy = "No one around for a group photo";
@@ -1114,6 +1395,7 @@ static void EndStage()
 	smooth = true;
 	people.clear();
 	hidden.clear();
+	self.on = false;
 #ifdef ECWOLF_IOSRIG
 	if(bHash)
 		CAMLOG("state hash after %08x\n", RigHash());
@@ -1383,8 +1665,10 @@ static void Palette(unsigned char pal[768])
 	}
 }
 
-void IOSCamera_AfterScene(const unsigned char *vbuf, unsigned pitch, int w, int h)
+void IOSCamera_AfterScene(unsigned char *vbuf, unsigned pitch, int w, int h)
 {
+	if(stage == STAGE_SELFIE && camOn)
+		DrawSelf(vbuf, pitch, w, h); // (BJ, holding the phone)
 	if(!IOSCapture_IsPending())
 		return;
 	unsigned char pal[768];
@@ -1505,6 +1789,67 @@ void IOSCamera_RigCommand(const char *cmd)
 		CAMLOG("stage %d cam %d figure %d people %d hidden %d taken %d busy %d eye %.2f %.2f h %.2f yaw %.0f tilt %.2f zoom %.2f\n",
 			stage, (int)camOn, (int)showFigure, (int)people.size(), (int)hidden.size(), ctTaken, IOSCamera_IsBusy(), cam.eye.x, cam.eye.y,
 			cam.h, cam.yaw * 180 / CAM_PI, cam.tilt, cam.zoom);
+	else if(sscanf(cmd, "goto %f %f %d", &a, &b, &n) == 3)
+	{
+		// (the rig only: the player put at tile x y facing angle n degrees)
+		player_t *p = Player();
+		if(!p)
+			return;
+		// (the nearest open tile)
+		for(int r = 0, found = 0;r < 4 && !found;r++)
+			for(int dy = -r;dy <= r && !found;dy++)
+				for(int dx = -r;dx <= r && !found;dx++)
+					if(!Solid((int)a + dx, (int)b + dy) && map->GetSpot((int)a + dx, (int)b + dy, 0)->zone)
+					{
+						a = (int)a + dx + 0.5f;
+						b = (int)b + dy + 0.5f;
+						found = 1;
+					}
+		p->mo->x = (fixed)lround(a * 65536.0);
+		p->mo->y = (fixed)lround(b * 65536.0);
+		p->mo->angle = ToAngle(n * CAM_PI / 180.0);
+		p->mo->EnterZone(map->GetSpot((int)a, (int)b, 0)->zone);
+		const MapSpot spot = map->GetSpot((int)a, (int)b, 0);
+		CAMLOG("went to %.1f %.1f %d (%s, zone %d)\n", a, b, n, Solid((int)a, (int)b) ? "solid" : "open", spot->zone ? (int)spot->zone->index : -1);
+	}
+	else if(!strcmp(cmd, "groups"))
+	{
+		// (the rig only: the areas with the most living enemies)
+		std::vector<int> ct(4096, 0);
+		std::vector<V2> at(4096);
+		for(AActor::Iterator it = AActor::GetIterator();it.Next();)
+		{
+			AActor *e = it;
+			if(!Alive(e) || e == Player()->mo || !e->GetZone() || e->GetZone()->index >= 4096)
+				continue;
+			ct[e->GetZone()->index]++;
+			at[e->GetZone()->index] = PosOf(e);
+		}
+		for(int z = 0;z < 4096;z++)
+			if(ct[z] >= 3)
+				CAMLOG("group: zone %d, %d enemies, one at %.1f %.1f\n", z, ct[z], at[z].x, at[z].y);
+	}
+	else if(!strcmp(cmd, "who"))
+	{
+		// (the rig only: the living enemies, how far, whether a selfie takes them)
+		if(!ReadEye())
+			return;
+		const MapZone *mine = Player()->mo->GetZone();
+		for(AActor::Iterator it = AActor::GetIterator();it.Next();)
+		{
+			AActor *e = it;
+			if(!Alive(e) || e == Player()->mo)
+				continue;
+			const double d = Len(PosOf(e) - eyeAt);
+			if(d > 30)
+				continue;
+			const MapZone *z = e->GetZone();
+			CAMLOG("who %s at %.1f %.1f: %.1f away, zone %d (mine %d)%s%s%s\n", e->GetClass()->GetName().GetChars(), PosOf(e).x, PosOf(e).y, d,
+				z ? (int)z->index : -1, mine ? (int)mine->index : -1,
+				(mine && z && (mine == z || map->CheckLink(mine, z, true))) ? " linked" : "", ClearLine(eyeAt, PosOf(e)) ? " seen" : "",
+				HereWithPlayer(e, d) ? " HERE" : "");
+		}
+	}
 	else if(sscanf(cmd, "gather %d", &n) == 1)
 	{
 		// (the rig only: the nearest n enemies brought to stand ahead, for

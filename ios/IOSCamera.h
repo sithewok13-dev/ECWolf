@@ -106,7 +106,7 @@ void IOSCamera_ViewHeight(int &viewShift, int32_t &viewZ);
 // CalcRotate: the angle sprites are seen from
 uint32_t IOSCamera_RotateAngle(uint32_t playerAngle);
 // R_RenderView: before the weapon (the clean photo); whether it is drawn
-void IOSCamera_AfterScene(const unsigned char *vbuf, unsigned pitch, int w, int h);
+void IOSCamera_AfterScene(unsigned char *vbuf, unsigned pitch, int w, int h);
 bool IOSCamera_HidesWeapon();
 // The play loop, after the frame went to the screen: the photo with the
 // status bar

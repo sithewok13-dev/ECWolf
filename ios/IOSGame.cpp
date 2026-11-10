@@ -35,6 +35,7 @@
 #include "wl_agent.h"
 #include "wl_game.h"
 #include "wl_play.h"
+#include "wl_main.h"
 #include "wl_debug.h"	// (before wl_net.h, which names its DebugCmd)
 #include "wl_net.h"
 #include "wl_loadsave.h"
@@ -192,6 +193,15 @@ bool IOSGame_PictureRect(SDL_Window *pWindow, int outW, int outH, int texW, int 
 	lastPicture[4] = outW;
 	lastPicture[5] = outH;
 	return true;
+}
+
+// The status bar's top on the screen (a fraction of the screen's height
+// from its top; 0: no status bar): FIRE and USE keep above it
+static float StatusTop()
+{
+	if(viewsize >= 21 || screenHeight <= 0 || statusbary2 <= 0 || (unsigned)statusbary2 >= screenHeight || lastPicture[5] <= 0)
+		return 0;
+	return (float)((lastPicture[1] + (double)statusbary2 * lastPicture[3] / screenHeight) / lastPicture[5]);
 }
 
 // (CAMERA's photo with the buttons: where the game's picture was last put,
@@ -901,6 +911,7 @@ void IOSGame_Frame()
 	}
 	hud.uWorld = worldCount;
 	hud.bGames = gameCount > 1;
+	hud.fStatusTop = StatusTop();
 	IOSTouch_SetWeapons(&wpn);
 	if(mode == IOSTOUCH_GAMEPLAY)
 		FeedIcons();

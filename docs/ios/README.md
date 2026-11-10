@@ -32,8 +32,9 @@ iPhone > Wolf3D > ECWolf.
 - Left thumb anywhere on the left: the move stick (sideways strafes).
   Slide your thumb up onto the small ^^ above it to run.
 - Drag anywhere else: turn.
-- FIRE and USE (doors, switches) bottom right; NEXT WPN (slide or hold it
-  for the weapon wheel) and MAP (the automap) top left.
+- FIRE and USE (doors, switches) bottom right, above the status bar; NEXT
+  WPN (slide or hold it for the weapon wheel) and MAP (the automap) top
+  left.
 - SAVE and LOAD: tap for the game's Save Game / Load Game menu; hold 0.3 s
   for a quick save / quick load.
 - MENU: tap for the game's menu; hold for the tray: LOOK (turning speed,

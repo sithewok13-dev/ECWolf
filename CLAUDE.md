@@ -13,7 +13,11 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   fills most of the screen above the home indicator, 64:27 full width on a
   Dynamic Island iPhone, at half the screen's pixels; it's the first entry
   of the mode list and overrides a saved resolution; `IOSGame_PictureRect`
-  places it at exactly 2x, nearest, above the home indicator), sound and
+  places it at exactly 2x, nearest, above the home indicator; on a
+  Dynamic Island iPhone that is the full width, with a 12 pt strip above
+  and the home indicator's below: the screen above it is 2.29:1, a little
+  taller than 64:27, the widest shape ECWolf lays out; the status bar's
+  teal sides are ECWolf's own widescreen look), sound and
   music, settings, saves and the
   log (`wolf3d-log.txt`) in Documents/ECWolf (Files shows them). No game
   files: a first screen says where to copy them and starts the game once
@@ -49,8 +53,22 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   everything it changes (people moved/posed/hidden, BJ's figure on the
   player's body, the lens's FOV, map `visible`/`amFlags`, actors'
   projection fields) applied only while the view is drawn and put back
-  right after. Selfie = a group photo from the player's eyes, no player in
-  it: the nearest 12 enemies brought in front (the way with room),
+  right after. Selfie = a group photo from the player's phone: BJ himself
+  big in a bottom corner (build 7, the owner's ask), as the one holding it:
+  his status-bar face from the player's data (`STFST00`, the grin
+  `STFEVL0`, Spear's golden-eyed `STFGOD0`, now and then `STFST01/02`),
+  its grey panel and blue line keyed out, scaled up a whole number of
+  times (nearest, 50-80% of the view's height), on shoulders in his grey
+  shirt (the victory run's) drawn in the same big pixels (`ShirtAt`), up
+  to a third of the face off the frame's edge; side, size, face, mirror
+  and shirt per photo (`PickSelf`), drawn into the 3D view after the scene
+  (`DrawSelf` from `IOSCamera_AfterScene`; the screen is drawn afresh each
+  frame), the view turned a little his way so the group stands clear of
+  him (`SelfShift`). Only enemies where the player is
+  (`HereWithPlayer`): his area or one joined to it by open doors
+  (ECWolf's sound zones, `CheckLink`) within 14 tiles, or in sight within
+  20 -- never anyone from elsewhere in the map; the nearest 12 of them
+  brought in front (the way with room), even just one;
   standing frame (`SpawnState`) or a step (`SeeState`), facing the lens,
   an arrangement per photo (huddle, peek, class rows, corner, tiny,
   totem, pyramid, lift: lifts via actor `z`, 0.58 a shoulder); other
@@ -63,6 +81,9 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   (`BJRun`: running in freeze, the jump's arms-up frame in cinema); Spear
   has none, so he isn't drawn there. Rig: `cam photo|selfie|burst|freeze|
   cinema|end|orbit y p|pan r d|zoom f|kinds n|selfies n|hash|status`,
+  and, changing the game (rig only), `cam goto x y angle` (the nearest
+  open tile), `cam who` (enemies near: area, sight, taken or not), `cam
+  groups` (areas with 3+ enemies), `cam gather n`;
   `@CAMERA`, `@TRAYCAM`; photos in `$IOSCAM_DIR`; `cam hash` (actors,
   map, clock, every RNG) is printed before and after each held stage.
 - **GAMES** (tray, only when more than one game is found; as the
@@ -203,7 +224,10 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   - NEXT WPN: tap = next; a 10 pt slide opens the weapon wheel at once; a
     0.3 s hold opens it to tap. The gap at the bottom cancels. The game
     holds still while a wheel is open. A haptic tick per slice.
-  - Wolf3D's buttons: FIRE and USE bottom right; NEXT WPN and MAP (automap)
+  - Wolf3D's buttons: FIRE and USE bottom right, above the game's status
+    bar (in the 3D view's lower right: the game reports the bar's top,
+    `IOSTouchHud.fStatusTop`, and a change lays them out again; no higher
+    than the middle; nothing else sits on the bar); NEXT WPN and MAP (automap)
     top left; CAMERA in the top row's middle; CHEAT (cheat mode), SAVE,
     LOAD, MENU top right; the stick strafes sideways.
   - HUD and buttons stay clear of the corners, the notch or Dynamic Island,

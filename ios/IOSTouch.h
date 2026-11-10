@@ -64,6 +64,8 @@ typedef struct IOSTouchHud {
   int iLevelNow;       /* the one being played (1..ctLevels), 0: none of them */
   unsigned int uWorld; /* changes with every level started or loaded */
   int bGames;          /* more than one game found: the tray's GAMES shows */
+  float fStatusTop;    /* the status bar's top, a fraction of the screen's height from its top (0: none):
+                          FIRE and USE stay above it */
   float afHudFrame[4]; /* (filled by the overlay: IOSTouch_GetHudFrame) */
 } IOSTouchHud;
 
