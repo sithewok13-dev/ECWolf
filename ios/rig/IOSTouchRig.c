@@ -19,6 +19,15 @@
      tapslice <i>               a tap on the open wheel's slice i
      state                      what shows, the wheel, the tray, the stick, the cheat
      levels / level <i>         the cheat's list of levels / a tap on row i
+     hud <style> [face]         the tray's HUD (split, strip, classic, none) and
+                                FACE (0/1), kept as the tray keeps them
+     opacityslide <buttons|hud> <0.2-1>
+                                a slider of the open OPACITY panel moved and let go
+
+   The phone: IOSRIG_SCREEN="<W> <H> <scale> <bottom inset> [<side inset>]"
+   (points; as ios/IOSGame.cpp reads it), else the iPhone 14's 844 x 390.
+   The tray's HUD, FACE and the HUD's strength are kept in
+   $HOME/.iosrig-hud (the phone's NSUserDefaults).
 */
 
 #define _GNU_SOURCE
@@ -29,12 +38,61 @@
 
 #include "IOSTouch.m"
 
-#define RIG_W 844.0
-#define RIG_H 390.0
-#define RIG_IN_LEFT 47.0
-#define RIG_IN_TOP 0.0
-#define RIG_IN_RIGHT 47.0
-#define RIG_IN_BOTTOM 21.0
+static double RIG_W = 844.0, RIG_H = 390.0, RIG_IN_LEFT = 47.0, RIG_IN_TOP = 0.0, RIG_IN_RIGHT = 47.0, RIG_IN_BOTTOM = 21.0;
+
+static void IOSTouchRig_Screen(void)
+{
+  static int bRead = 0;
+  if (bRead) return;
+  bRead = 1;
+  const char *env = getenv("IOSRIG_SCREEN");
+  double w, h, scale, bottom, side = 47.0;
+  const int n = env ? sscanf(env, "%lf %lf %lf %lf %lf", &w, &h, &scale, &bottom, &side) : 0;
+  if (n >= 4 && w > 0 && h > 0) {
+    RIG_W = w;
+    RIG_H = h;
+    RIG_IN_BOTTOM = bottom;
+    RIG_IN_LEFT = RIG_IN_RIGHT = side;
+  }
+  printf("rig: screen %.0f x %.0f, insets %.0f %.0f %.0f %.0f\n", RIG_W, RIG_H, RIG_IN_LEFT, RIG_IN_TOP, RIG_IN_RIGHT, RIG_IN_BOTTOM);
+}
+
+// The HUD's settings (the view's NSUserDefaults): a file, $HOME/.iosrig-hud
+// ("style face hud-strength")
+static void IOSTouchRig_HudPrefsPath(char *path, size_t size)
+{
+  const char *home = getenv("HOME");
+  snprintf(path, size, "%s/.iosrig-hud", home ? home : ".");
+}
+
+static void IOSTouch_LoadHudPrefs(void)
+{
+  char path[512];
+  IOSTouchRig_HudPrefsPath(path, sizeof(path));
+  FILE *f = fopen(path, "r");
+  if (f) {
+    int style = 0, face = 1;
+    float k = 1.0f;
+    const int n = fscanf(f, "%d %d %f", &style, &face, &k);
+    if (n >= 2) {
+      _iHudStyle = style;
+      _bHudFace = face;
+    }
+    if (n >= 3) _fHudOpacity = IOSTouch_OpacityStep(k);
+    fclose(f);
+  }
+  printf("rig: hud prefs loaded: style %d face %d hud %.2f\n", _iHudStyle, _bHudFace, (double)_fHudOpacity);
+}
+
+static void IOSTouch_SaveHudPrefs(void)
+{
+  char path[512];
+  IOSTouchRig_HudPrefsPath(path, sizeof(path));
+  FILE *f = fopen(path, "w");
+  if (!f) return;
+  fprintf(f, "%d %d %.2f\n", _iHudStyle, _bHudFace, (double)_fHudOpacity);
+  fclose(f);
+}
 
 static double IOSTouchRig_Now(void)
 {
@@ -49,6 +107,7 @@ static unsigned int _ulRigFrames = 0;
 static void IOSTouchRig_Layout(void)
 {
   const IOSTouchRect none = { 0, 0, 0, 0, 0 };
+  IOSTouchRig_Screen();
   IOSTouch_LayoutButtons(RIG_W, RIG_H, RIG_IN_LEFT, RIG_IN_TOP, RIG_IN_RIGHT, RIG_IN_BOTTOM, 1, &none, &none, &none);
   IOSTouch_SetHudFrame(RIG_W, RIG_H, RIG_IN_LEFT, RIG_IN_TOP, RIG_IN_RIGHT, RIG_IN_BOTTOM);
   _bRigLaidOut = 1;
@@ -77,6 +136,10 @@ int IOSTouch_Update(void *pSDLWindow, int iMode, const IOSTouchHud *pHud, unsign
   if (pHud) _hud = *pHud;
   if (!_bRigLaidOut || IOSTouch_StatusTopMoved()) {
     IOSTouchRig_Layout();
+    IOSTouchHudLayout hl;
+    IOSTouch_GetHudLayout(&hl);
+    printf("rig: layout: hud %d face %d alpha %.2f picture bottom %.1f pills %.1f-%.1f x %.1f-%.1f strip half %.1f\n", hl.iStyle,
+           hl.bFace, (double)hl.fAlpha, _hud.fPictureBottom * RIG_H, _fPillTop, _fPillBottom, _fPillLeft, _fPillRight, _fStripHalf);
     printf("rig: layout: status bar top %.1f, FIRE %.1f,%.1f r %.0f, USE %.1f,%.1f r %.0f\n", _hud.fStatusTop * RIG_H,
            _aButtons[BTN_FIRE].x, _aButtons[BTN_FIRE].y, _aButtons[BTN_FIRE].radius, _aButtons[BTN_USE].x, _aButtons[BTN_USE].y,
            _aButtons[BTN_USE].radius);
@@ -107,7 +170,7 @@ static const struct { const char *name; int button; } _aRigNames[] = {
   { "NEXTWPN", BTN_NEXTWPN }, { "SAVE", BTN_QUICKSAVE }, { "LOAD", BTN_QUICKLOAD },
   { "MENU", BTN_MENU }, { "RESUME", BTN_RESUME }, { "BACK", BTN_BACK }, { "MENUUP", BTN_MENUUP },
   { "MENUDOWN", BTN_MENUDOWN }, { "TRAYLOOK", BTN_TRAYLOOK }, { "TRAYRUN", BTN_TRAYRUN },
-  { "TRAYOPACITY", BTN_TRAYOPACITY }, { "TRAYFPS", BTN_TRAYFPS }, { "TRAYCHEAT", BTN_TRAYCHEAT },
+  { "TRAYOPACITY", BTN_TRAYOPACITY }, { "TRAYHUD", BTN_TRAYHUD }, { "TRAYFACE", BTN_TRAYFACE }, { "TRAYFPS", BTN_TRAYFPS }, { "TRAYCHEAT", BTN_TRAYCHEAT },
   { "TRAYLEVEL", BTN_TRAYLEVEL }, { "CAMERA", BTN_CAMERA }, { "TRAYCAM", BTN_TRAYCAM }, { "TRAYGAMES", BTN_TRAYGAMES }, { "TRAYKEYS", BTN_TRAYKEYS },
 };
 
@@ -203,6 +266,13 @@ static void IOSTouchRig_State(void)
     IOSTouch_WheelMiddleState(&mid);
     printf("rig: middle \"%s\" \"%s\" \"%s\"\n", mid.strTitle ? mid.strTitle : "", mid.strCount, mid.strHint ? mid.strHint : "");
   }
+  {
+    IOSTouchHudLayout hl;
+    IOSTouch_GetHudLayout(&hl);
+    const IOSTouchRect r = IOSTouch_OpacityPanel();
+    printf("rig: hud style %d face %d hud opacity %.2f buttons %.2f panel %d (%.0f,%.0f)-(%.0f,%.0f) pills %.1f-%.1f\n", hl.iStyle,
+           hl.bFace, (double)hl.fAlpha, (double)_fOpacity, _bOpacityOpen && _bTrayOpen, r.x0, r.y0, r.x1, r.y1, _fPillTop, _fPillBottom);
+  }
   if (_strCamMessage[0] && CACurrentMediaTime() - _tCamMessage < _fCamMessageTime) printf("rig: message \"%s\"\n", _strCamMessage);
   fflush(stdout);
 }
@@ -268,6 +338,23 @@ void IOSTouchRig_Command(const char *cmd)
       if (!IOSGame_LevelInfo(i, strName, sizeof(strName), strDetail, sizeof(strDetail))) break;
       printf("rig: levels %2d%s %s | %s\n", i, i == _hud.iLevelNow ? "*" : " ", strName, strDetail);
     }
+  }
+  else if (!strcmp(op, "hud") && argc >= 2) {
+    static const char *const astr[IOSTOUCH_HUD_COUNT] = { "split", "strip", "classic", "none" };
+    IOSTouch_HudPrefs();
+    for (int i = 0; i < IOSTOUCH_HUD_COUNT; i++) {
+      if (!strcasecmp(argv[1], astr[i])) _iHudStyle = i;
+    }
+    if (argc >= 3) _bHudFace = atoi(argv[2]) != 0;
+    IOSTouch_SaveHudPrefs();
+    printf("rig: hud %s face %d\n", astr[_iHudStyle], _bHudFace);
+  }
+  else if (!strcmp(op, "opacityslide") && argc >= 3) {
+    // as the view's sliders: only while the panel is open; kept as it lifts
+    const int bOpen = _bOpacityOpen && _bTrayOpen;
+    if (bOpen && !strcasecmp(argv[1], "hud")) IOSTouch_SetHudOpacity((float)atof(argv[2]), 1);
+    else if (bOpen) _fOpacity = IOSTouch_OpacityStep((float)atof(argv[2]));
+    printf("rig: opacityslide %s %s (panel %d) -> buttons %.2f hud %.2f\n", argv[1], argv[2], bOpen, (double)_fOpacity, (double)_fHudOpacity);
   }
   else if (!strcmp(op, "state")) {
     IOSTouchRig_State();

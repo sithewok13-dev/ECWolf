@@ -23,7 +23,8 @@
        weapon in the player's weapon slots (knife, pistol, machine gun, chain
        gun), with its picture from the game's own art and its ammo. The game
        holds still while it is open.
-     - MENU's tray: LOOK (0.5x to 3x), ALWAYS RUN, OPACITY, FPS, CAMERA,
+     - MENU's tray: LOOK (0.5x to 3x), ALWAYS RUN, OPACITY (BUTTONS and
+       HUD), HUD (SPLIT, STRIP, CLASSIC, NONE), FACE (in the HUD), FPS, CAMERA,
        CHEAT, LEVEL (in a level, single player), GAMES (more than one game
        found: "Switch game") and the keyboard (the iOS keyboard, typing
        into the game), with the build stamp under it.
@@ -66,6 +67,8 @@ typedef struct IOSTouchHud {
   int bGames;          /* more than one game found: the tray's GAMES shows */
   float fStatusTop;    /* the status bar's top, a fraction of the screen's height from its top (0: none):
                           FIRE and USE stay above it */
+  float fPictureBottom;/* the game's picture's bottom edge, a fraction of the screen's height from its top
+                          (0: not known): the HUD's pills keep inside it */
   float afHudFrame[4]; /* (filled by the overlay: IOSTouch_GetHudFrame) */
 } IOSTouchHud;
 
@@ -153,6 +156,26 @@ int IOSTouch_TakeMenuKey(void);
    home indicator and a notch, as x0, y0, x1, y1 fractions of the screen. The
    whole screen until IOSTouch_Update has seen SDL's view. */
 void IOSTouch_GetHudFrame(float afFrame[4]);
+/* The HUD (MENU's tray's HUD and FACE, and OPACITY's HUD slider,
+   remembered; ECWolf's status bar code draws it, wolf_sbar.cpp): SPLIT, two
+   pills at the bottom (BJ on the left: face, health, lives; the gun, its
+   ammo and the keys on the right: FIRE and USE move up clear of it), STRIP
+   (one pill in the middle, between the buttons), CLASSIC (the game's status
+   bar: FIRE and USE keep above it) or NONE; FACE, BJ's face in the pills;
+   fAlpha, how strongly the HUD shows (20%-100%; CLASSIC's status bar too).
+   Where the pills go, in fractions of the screen: */
+enum { IOSTOUCH_HUD_SPLIT = 0, IOSTOUCH_HUD_STRIP, IOSTOUCH_HUD_CLASSIC, IOSTOUCH_HUD_NONE, IOSTOUCH_HUD_COUNT };
+typedef struct IOSTouchHudLayout {
+  int iStyle;          /* IOSTOUCH_HUD_* */
+  int bFace;           /* BJ's face in the pills */
+  float fAlpha;        /* the HUD slider: 0.2 to 1 */
+  float fPillH;        /* a pill's height (of the screen's height) */
+  float fPillBottom;   /* the pills' bottom edge (of the height, from the top) */
+  float fLeft, fRight; /* SPLIT's pills' outer edges (of the width) */
+  float fStripHalf;    /* STRIP: its pill reaches at most this far either side of the middle (of the width),
+                          clear of the buttons */
+} IOSTouchHudLayout;
+void IOSTouch_GetHudLayout(IOSTouchHudLayout *pLayout);
 /* The frame rate asked of the screen: fixed at 60 in Wolf3D (no switch in
    the tray). The game keeps to it too (i_ios.mm: IOS_FrameCap) */
 int IOSTouch_MaxFps(void);

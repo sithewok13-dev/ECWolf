@@ -86,6 +86,37 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   groups` (areas with 3+ enemies), `cam gather n`;
   `@CAMERA`, `@TRAYCAM`; photos in `$IOSCAM_DIR`; `cam hash` (actors,
   map, clock, every RNG) is printed before and after each held stage.
+- **HUD** (tray's HUD: SPLIT -> STRIP -> CLASSIC -> NONE, default SPLIT,
+  tap only; FACE on/off, default on; NSUserDefaults `iosTouchHud` 0-3,
+  `iosTouchHudFace`; the owner's approved mockups, from the UZDoom port's):
+  SPLIT, STRIP and NONE give the 3D view the whole screen (view size 21,
+  no status bar; CLASSIC view size 20; set each play-loop pass from the
+  HUD, `HudViewSize` in `IOSGame_CheckKeys`). SPLIT draws two dark rounded
+  pills at the bottom: left [BJ's face] | first-aid kit + health % | the
+  extra life + lives; right the gun in hand (its status-bar picture,
+  recoloured light grey) + ammo | the keys held. FIRE and USE sit 14 pt
+  above them. STRIP: one pill in the middle, shrunk to fit between FIRE/
+  USE and the middle. CLASSIC: ECWolf's status bar, FIRE and USE above it
+  (its top from the game, `fStatusTop`). NONE: nothing. Warnings: health
+  under 25 red, with a red glow pulsing twice a second (and the game's own
+  bloodied face); ammo red strictly below 25% of its maximum, or at 0.
+  One size: the pill is 64 px at 2000x921 (30.6 pt of a 440 pt screen),
+  scaled with the screen's height (0.8-1.25x), inside the safe frame and
+  3 pt inside the game's picture (`IOSTouchHud.fPictureBottom`: the picture
+  stops above the home indicator, so the pills are ~8 pt higher than in
+  the mockups). The overlay computes the layout (`IOSTouch_PillGeometry`,
+  `IOSTouch_GetHudLayout`); the game only reads it, so touch and HUD agree.
+  Drawn by `ios/IOSHud.cpp` (`IOSHud_Draw`, from `R_RenderView` in
+  `wl_draw.cpp` after the weapon) into ECWolf's 8-bit frame: composed in
+  RGB, put back as the palette's nearest colours; the game's own graphics
+  at run time (FONTN048.. digits, the % cut from STBACK, MEDIA0, ONUPA0,
+  STKEYS1-4, the weapon's icon, the mugshot `gamestate.faceframe` keyed out
+  of its panel), nothing in the repo. The HUD's strength is OPACITY's HUD
+  slider (`iosTouchHudOpacity`, 20-100%): it fades the pills and their
+  contents, and CLASSIC's status bar into the view's border
+  (`IOSHud_StatusBarFadeBegin/End` around `WolfStatusBar::DrawStatusBar`).
+  CAMERA: clean photos have no HUD (taken before the weapon), HUD photos
+  have it. None in the photo views (selfie, freeze, cinema).
 - **GAMES** (tray, only when more than one game is found; as the
   Half-Life and Raze ports): "Switch game", the picker's cards over the
   game (held still), "PLAYING" on the current one, Cancel
@@ -124,7 +155,8 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   picker's fallback and the error alert, the log, the 60 FPS cap; SDL's accelerometer joystick is off: ECWolf read
   it as a stick and the view turned by itself),
   `IOSPicker.mm`, `IOSTouch.m`/`.h` (the overlay, C core + UIKit view, from
-  the UZDoom port's), `IOSGame.cpp` (the game side), `IOSGameData.cpp`,
+  the UZDoom port's), `IOSGame.cpp` (the game side), `IOSHud.cpp` (the
+  touch HUD), `IOSGameData.cpp`,
   `Info.plist.in`, `build_deps.sh` (SDL2, SDL2_mixer, SDL2_net). Engine
   changes are `#ifdef ECWOLF_IOS` (the app), `ECWOLF_TOUCH` (the touch
   controls: iOS and the rig) or `ECWOLF_IOSPATHS` (the data search): hooks
@@ -134,7 +166,8 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   slot "Quicksave"), `sdlvideo.cpp`, `c_cvars.cpp` (iOS defaults: full
   screen, vsync, view size 20), `id_us_1.cpp` (the keyboard for typing a
   save's name), `r_sprites.cpp` (the wheel's pictures), `wl_main.cpp`, `wl_debug.cpp` (`IOSCheat_GiveAll`), `g_mapinfo.h`
-  (`GetMapInfoName`, for the cheat's list).
+  (`GetMapInfoName`, for the cheat's list), `wl_draw.cpp` (`IOSHud_Draw`),
+  `g_wolf/wolf_sbar.cpp` (CLASSIC's fade).
 - **Touch modes:** GAMEPLAY only in the frames the play loop pumps
   (`IOSGame_SetInPlay`); everywhere else (menus, title and story screens,
   intermissions, Y/N questions) MENUS: a tap is Return, a slide is arrow
@@ -163,12 +196,18 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
 - Run with `IOSRIG_DOCUMENTS=<folder standing in for Documents>`,
   `IOSRIG_SCRIPT=<script>` and `HOME=<scratch>` under Xvfb
   (`--res 1688 780`). A phone's screen: `IOSRIG_SCREEN="874 402 3 21"`
-  (points wide, high, scale, home indicator inset) on an X screen of its
-  pixels (`-screen 0 2622x1206x24`), no `--res`. With no game files it prints the first screen and
+  (points wide, high, scale, home indicator inset, and optionally the side
+  insets, default 47; the overlay's layout follows it too) on an X screen
+  of its pixels (`-screen 0 2622x1206x24`), no `--res`. The mockups'
+  phone: `"956 440 3 21 62"` on `2868x1320x24`. With no game files it prints the first screen and
   exits 3. Script lines: `frame <n>`, `wait <n>`, `waitplay` (until a
   level is being played), touches (`down/move/up <id> <x y | @BUTTON>`,
-  e.g. `@SAVE`, `@TRAYCHEAT`; `tapslice`, `state`, `levels`, `level <i>`),
-  `pos`, `key <SDL name>`, `shot <png>` (ImageMagick `import`), `quit`.
+  e.g. `@SAVE`, `@TRAYCHEAT`, `@TRAYHUD`; `tapslice`, `state`, `levels`,
+  `level <i>`; `hud <split|strip|classic|none> [face]`, `opacityslide
+  <buttons|hud> <0.2-1>` on the open OPACITY panel; the HUD's settings in
+  `$HOME/.iosrig-hud`), `pos`, `key <SDL name>`, `shot <png>` (ImageMagick
+  `import`), `rigset health n | ammo n | all | weapon i` (rig only: the
+  HUD's warnings and contents), `quit`.
   `--tedlevel MAP01 --nowait` starts in a level. `key` presses and lets go
   in one go: the menus may miss it (use `@BACK` there). The rig draws no
   overlay: its shots show the game only. The picker is the
@@ -201,9 +240,10 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     cancels; SAVE wins a tie (LOAD's tap does nothing while SAVE is held);
     only a finished hold saves or loads.
   - MENU: tap = game menu; hold 0.45 s = tray with LOOK, ALWAYS RUN,
-    OPACITY, FPS, CAMERA, CHEAT, LEVEL (in a level, single player), GAMES
-    (more than one game found), keyboard, and the
-    build stamp under it in small dim text (not a button).
+    OPACITY, HUD, FACE, FPS, CAMERA, CHEAT, LEVEL (in a level, single
+    player), GAMES (more than one game found), keyboard, and the build
+    stamp under it in small dim text (not a button; hidden while OPACITY's
+    panel is open).
   - LOOK (tray): the drag's turning speed, shown on it ("LOOK 1x"); a tap
     steps 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3x (round to 0.5x); held 0.45 s
     (ring) back to 1x (build 2's speed) with a toast and a haptic.
@@ -214,9 +254,14 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     shows with the stick; the thumb slid up onto it runs straight ahead (a
     haptic tick, the knob on the marker, lit blue). On: no marker, the stick
     always runs.
-  - OPACITY (tray): tap = a slider under the tray, 20% to 100% in 5% steps,
-    live, saved on lift (`iosTouchOpacity`, default 100%); hold = back to
-    100%. The controls follow it; the tray and the wheel stay at full.
+  - OPACITY (tray): tap = a panel under the tray (`IOSTouch_OpacityPanel`)
+    with two sliders, BUTTONS (the controls: `iosTouchOpacity`) and HUD (the
+    game's HUD: `iosTouchHudOpacity`), each 20% to 100% in 5% steps, live,
+    saved on lift, default 100%; hold = both back to 100% (toast, haptic).
+    The tray and the wheel stay at full.
+  - HUD (tray): tap = the next look (SPLIT, STRIP, CLASSIC, NONE; "HUD\n
+    SPLIT"); FACE (tray): BJ's face in the pills on/off (lit while on, dim
+    outside SPLIT and STRIP). See **HUD** above.
   - FPS (tray): tap = show/hide the FPS readout. Wolf3D differs from the
     other ports here (the owner's call): no 60/120 switch, no hold action,
     the label just "FPS"; the game runs at a fixed 60.
@@ -224,10 +269,11 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   - NEXT WPN: tap = next; a 10 pt slide opens the weapon wheel at once; a
     0.3 s hold opens it to tap. The gap at the bottom cancels. The game
     holds still while a wheel is open. A haptic tick per slice.
-  - Wolf3D's buttons: FIRE and USE bottom right, above the game's status
-    bar (in the 3D view's lower right: the game reports the bar's top,
-    `IOSTouchHud.fStatusTop`, and a change lays them out again; no higher
-    than the middle; nothing else sits on the bar); NEXT WPN and MAP (automap)
+  - Wolf3D's buttons: FIRE and USE bottom right: in SPLIT 14 pt above the
+    pills; in CLASSIC above the game's status bar (the game reports the
+    bar's top, `IOSTouchHud.fStatusTop`, and a change lays them out again;
+    no higher than the middle; nothing else sits on the bar); in STRIP and
+    NONE above the home indicator; NEXT WPN and MAP (automap)
     top left; CAMERA in the top row's middle; CHEAT (cheat mode), SAVE,
     LOAD, MENU top right; the stick strafes sideways.
   - HUD and buttons stay clear of the corners, the notch or Dynamic Island,

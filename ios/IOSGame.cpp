@@ -912,6 +912,8 @@ void IOSGame_Frame()
 	hud.uWorld = worldCount;
 	hud.bGames = gameCount > 1;
 	hud.fStatusTop = StatusTop();
+	if(lastPicture[5] > 0)
+		hud.fPictureBottom = (float)((lastPicture[1] + lastPicture[3]) / (double)lastPicture[5]);
 	IOSTouch_SetWeapons(&wpn);
 	if(mode == IOSTOUCH_GAMEPLAY)
 		FeedIcons();
@@ -956,8 +958,24 @@ void IOSGame_Frame()
 	inFrame = false;
 }
 
+// The touch HUD's view (IOSTouch.h's IOSTOUCH_HUD_*): CLASSIC keeps ECWolf's
+// status bar (view size 20), the others give the 3D view the whole screen
+// (21: no status bar; SPLIT and STRIP draw their pills over it, IOSHud.cpp)
+static void HudViewSize()
+{
+	IOSTouchHudLayout hl;
+	IOSTouch_GetHudLayout(&hl);
+	const int want = hl.iStyle == IOSTOUCH_HUD_CLASSIC ? 20 : 21;
+	if(viewsize == want)
+		return;
+	NewViewSize(want);
+	if(viewsize < 21)
+		DrawPlayScreen();
+}
+
 void IOSGame_CheckKeys()
 {
+	HudViewSize();
 	if(!wantQuickSave && !wantQuickLoad)
 		return;
 	const bool save = wantQuickSave;
@@ -1237,6 +1255,25 @@ static void RigFrame()
 			snprintf(cmdline, sizeof(cmdline), "import -window root '%s' 2>/dev/null", line + 5);
 			if(system(cmdline) != 0)
 				printf("rig: shot failed\n");
+		}
+		else if(!strncmp(line, "rigset ", 7))
+		{
+			// (rig only: the HUD's warnings and contents) "rigset health n",
+			// "rigset ammo n", "rigset all" (every weapon and key, the
+			// chain gun in hand), "rigset weapon <i>" (the wheel's i)
+			player_t *p = Player();
+			int n = 0;
+			if(p && p->mo && sscanf(line + 7, "health %d", &n) == 1)
+				p->health = p->mo->health = n;
+			else if(p && p->ReadyWeapon && p->ReadyWeapon->ammo[0] && sscanf(line + 7, "ammo %d", &n) == 1)
+				p->ReadyWeapon->ammo[0]->amount = n;
+			else if(p && p->mo && !strcmp(line + 7, "all"))
+			{
+				IOSCheat_GiveAll(*p);
+				P_GiveKeys(p->mo, 101);
+			}
+			else if(sscanf(line + 7, "weapon %d", &n) == 1)
+				PickWeapon(n);
 		}
 		else if(!strncmp(line, "cam ", 4))
 			IOSCamera_RigCommand(line + 4); // (CAMERA: photo, selfie, freeze, orbit... see IOSCamera.cpp)

@@ -29,6 +29,7 @@
 #include "thingdef/thingdef.h"
 #ifdef ECWOLF_TOUCH
 #include "IOSCamera.h"
+#include "IOSHud.h"
 #endif
 
 /*
@@ -1255,6 +1256,9 @@ void R_RenderView()
 	if(!IOSCamera_HidesWeapon())
 #endif
 	DrawPlayerWeapon ();    // draw player's hands
+#ifdef ECWOLF_TOUCH
+	IOSHud_Draw(); // (the touch HUD's pills: SPLIT, STRIP)
+#endif
 
 	if((control[ConsolePlayer].buttonstate[bt_showstatusbar] || control[ConsolePlayer].buttonheld[bt_showstatusbar]) && viewsize == 21)
 	{
