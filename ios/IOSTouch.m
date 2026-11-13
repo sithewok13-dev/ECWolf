@@ -434,13 +434,14 @@ static IOSTouchRect _rMessages;
 // IOSTouch_SaveHudPrefs: the view's NSUserDefaults, the rig's file). The
 // game draws it (wolf_sbar.cpp) where IOSTouch_GetHudLayout says. The
 // pills' sizes are the approved mockups' (2000 x 921 pixels of a 956 x 440
-// point screen), as the UZDoom port's, scaled with the screen's height (one
-// size for every phone and iPad: 0.8 to 1.25 of it): 64 px high, 34 px
+// point screen) made 1.3x larger (the owner's "large", the only size), as
+// the UZDoom port's, scaled with the screen's height (one size for every
+// phone and iPad: 0.8 to 1.25 of it): 83 px high, 34 px
 // above the bottom where there's a home indicator (but inside the game's
 // picture, which stops above it), 2.4 pt in from the HUD frame's sides. In
 // SPLIT, FIRE and USE sit IOSTOUCH_PILL_CLEAR above them; in CLASSIC,
 // above the game's status bar.
-#define IOSTOUCH_PILL_H 30.6
+#define IOSTOUCH_PILL_H 39.8 // (the mockups' 30.6, 1.3x)
 #define IOSTOUCH_PILL_REF_H 440.0
 #define IOSTOUCH_PILL_BOTTOM 16.3
 #define IOSTOUCH_PILL_BOTTOM_BARE 8.0 // (no home indicator)

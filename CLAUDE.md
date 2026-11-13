@@ -100,7 +100,8 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   (its top from the game, `fStatusTop`). NONE: nothing. Warnings: health
   under 25 red, with a red glow pulsing twice a second (and the game's own
   bloodied face); ammo red strictly below 25% of its maximum, or at 0.
-  One size: the pill is 64 px at 2000x921 (30.6 pt of a 440 pt screen),
+  One size, the owner's "large": the pill is 83 px at 2000x921 (39.8 pt of
+  a 440 pt screen, 1.3x the mockups'; its bottom where the mockups' was),
   scaled with the screen's height (0.8-1.25x), inside the safe frame and
   3 pt inside the game's picture (`IOSTouchHud.fPictureBottom`: the picture
   stops above the home indicator, so the pills are ~8 pt higher than in
