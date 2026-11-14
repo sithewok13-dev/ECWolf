@@ -7,9 +7,9 @@
 // CLASSIC SPLIT and CLASSIC STRIP are ECWolf's own status bar (its 320
 // wide picture, none of the border beside it) drawn over the full-screen
 // view: cut after BJ's face to the two bottom corners, or whole in the
-// middle (DrawBar). CLASSIC is ECWolf's own status bar, faded by the HUD
-// slider (IOSHud_StatusBarFadeBegin / End). Everything is made at run time from the
-// player's own data; nothing of it is in the repository.
+// middle (DrawBar). CLASSIC is ECWolf's own status bar, always at full
+// strength (the owner's call: the HUD slider is not for it). Everything is
+// made at run time from the player's own data; nothing of it is in the repository.
 //
 // ECWolf draws in 8 bits: the pills are composed in RGB over the frame and
 // put back as the palette's nearest colours.
@@ -882,60 +882,4 @@ void IOSHud_Draw()
 			u *= room / need;
 		DrawPill(cv, all, mid - PillW(all) * u / 2, bottom, u, alpha, pulse);
 	}
-}
-
-// CLASSIC's status bar faded by the HUD slider: over the view's border (the
-// view doesn't reach under it). Before the bar is drawn, its place is filled
-// with the border and kept; after, the bar is mixed with it.
-static std::vector<BYTE> fadeUnder;
-static int fadeRect[4];
-static float fadeAlpha = 1;
-
-bool IOSHud_StatusBarFadeBegin()
-{
-	IOSTouchHudLayout hl;
-	IOSTouch_GetHudLayout(&hl);
-	fadeAlpha = hl.fAlpha;
-	if(hl.iStyle != IOSTOUCH_HUD_CLASSIC || fadeAlpha >= 0.999f || viewsize >= 21 || !ingame || !levelInfo)
-		return false;
-	const int x0 = statusbarx, y0 = statusbary2, x1 = (int)screenWidth - statusbarx, y1 = (int)screenHeight;
-	if(x1 <= x0 || y1 <= y0 || y0 < 0)
-		return false;
-	VWB_DrawFill(TexMan(levelInfo->GetBorderTexture()), x0, y0, x1, y1);
-	BYTE *buf = VL_LockSurface();
-	if(!buf)
-		return false;
-	const int pitch = SCREENPITCH, w = SCREENWIDTH, h = SCREENHEIGHT;
-	fadeRect[0] = x0;
-	fadeRect[1] = y0;
-	fadeRect[2] = x1 < w ? x1 : w;
-	fadeRect[3] = y1 < h ? y1 : h;
-	fadeUnder.resize((size_t)(fadeRect[2] - x0) * (fadeRect[3] - y0));
-	for(int y = y0;y < fadeRect[3];y++)
-		memcpy(&fadeUnder[(size_t)(y - y0) * (fadeRect[2] - x0)], buf + y * pitch + x0, fadeRect[2] - x0);
-	VL_UnlockSurface();
-	return true;
-}
-
-void IOSHud_StatusBarFadeEnd()
-{
-	BYTE *buf = VL_LockSurface();
-	if(!buf)
-		return;
-	MakeNearest();
-	const int pitch = SCREENPITCH;
-	const int x0 = fadeRect[0], y0 = fadeRect[1], x1 = fadeRect[2], y1 = fadeRect[3];
-	const float a = fadeAlpha < 0.2f ? 0.2f : fadeAlpha;
-	for(int y = y0;y < y1;y++)
-		for(int x = x0;x < x1;x++)
-		{
-			BYTE &d = buf[y * pitch + x];
-			const PalEntry &top = GPalette.BaseColors[d];
-			const PalEntry &under = GPalette.BaseColors[fadeUnder[(size_t)(y - y0) * (x1 - x0) + x - x0]];
-			const int r = (int)(under.r + (top.r - under.r) * a + 0.5f);
-			const int g = (int)(under.g + (top.g - under.g) * a + 0.5f);
-			const int b = (int)(under.b + (top.b - under.b) * a + 0.5f);
-			d = nearest[((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)];
-		}
-	VL_UnlockSurface();
 }

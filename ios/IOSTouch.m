@@ -886,6 +886,8 @@ static int IOSTouch_HudRowShown(int row)
   IOSTouch_HudPrefs();
   if (row == IOSTOUCH_HUDROW_SIZE) return _iHudStyle != IOSTOUCH_HUD_CLASSIC && _iHudStyle != IOSTOUCH_HUD_NONE;
   if (row == IOSTOUCH_HUDROW_FACE) return IOSTouch_HudIsPills(_iHudStyle);
+  // (the HUD's opacity: not for CLASSIC, always at full (the owner's call), nor NONE: nothing to fade)
+  if (row == IOSTOUCH_HUDROW_HUD) return _iHudStyle != IOSTOUCH_HUD_CLASSIC && _iHudStyle != IOSTOUCH_HUD_NONE;
   return row >= 0 && row < IOSTOUCH_HUDROWS;
 }
 static int IOSTouch_HudRowsShown(void)
@@ -3996,6 +3998,8 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     else {
       UISlider *sl = row == IOSTOUCH_HUDROW_HUD ? hudOpacitySlider : opacitySlider;
       UILabel *v = row == IOSTOUCH_HUDROW_HUD ? hudOpacityValue : opacityValue;
+      if (sl.hidden == bShown) sl.hidden = !bShown;
+      if (v.hidden == bShown) v.hidden = !bShown;
       sl.frame = CGRectMake(x0, y + 5, w - x0 - IOSTOUCH_OPACITY_VALUE_W - 6, 30);
       v.frame = CGRectMake(w - IOSTOUCH_OPACITY_VALUE_W - 6, y, IOSTOUCH_OPACITY_VALUE_W, rowH);
     }

@@ -539,10 +539,6 @@ void WolfStatusBar::DrawStatusBar()
 	if(viewsize == 21 && ingame)
 		return;
 
-#ifdef ECWOLF_TOUCH
-	// (the touch HUD's CLASSIC, faded by its slider: into the border)
-	const bool iosFade = IOSHud_StatusBarFadeBegin();
-#endif
 	VWB_DrawGraphic(TexMan("STBAR"), 0, 160);
 	DrawFace ();
 	DrawHealth ();
@@ -553,10 +549,6 @@ void WolfStatusBar::DrawStatusBar()
 	DrawWeapon ();
 	DrawScore ();
 	DrawItems ();
-#ifdef ECWOLF_TOUCH
-	if(iosFade)
-		IOSHud_StatusBarFadeEnd();
-#endif
 }
 
 #ifdef ECWOLF_TOUCH

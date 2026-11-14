@@ -127,8 +127,9 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   STKEYS1-4, the weapon's icon, the mugshot `gamestate.faceframe` keyed out
   of its panel), nothing in the repo. The HUD's strength is the HUD panel's HUD
   slider (`iosTouchHudOpacity`, 20-100%): it fades the pills and their
-  contents, and CLASSIC's status bar into the view's border
-  (`IOSHud_StatusBarFadeBegin/End` around `WolfStatusBar::DrawStatusBar`).
+  contents, and the CLASSIC SPLIT / STRIP bars, digits, face and keys
+  with them (`DrawBar` mixes the whole bar). Plain CLASSIC is always at
+  full (the owner's call), so the panel has no HUD row for it (nor NONE).
   CAMERA: clean photos have no HUD (taken before the weapon), HUD photos
   have it. None in the photo views (selfie, freeze, cinema).
 - **GAMES** (tray, only when more than one game is found; as the
@@ -181,7 +182,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   screen, vsync, view size 20), `id_us_1.cpp` (the keyboard for typing a
   save's name), `r_sprites.cpp` (the wheel's pictures), `wl_main.cpp`, `wl_debug.cpp` (`IOSCheat_GiveAll`), `g_mapinfo.h`
   (`GetMapInfoName`, for the cheat's list), `wl_draw.cpp` (`IOSHud_Draw`),
-  `g_wolf/wolf_sbar.cpp` (CLASSIC's fade).
+  `g_wolf/wolf_sbar.cpp` (where CLASSIC SPLIT cuts the bar).
 - **Touch modes:** GAMEPLAY only in the frames the play loop pumps
   (`IOSGame_SetInPlay`); everywhere else (menus, title and story screens,
   intermissions, Y/N questions) MENUS: a tap is Return, a slide is arrow
@@ -281,10 +282,11 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     STRIP, CLASSIC, NONE); SIZE, SMALL / MEDIUM / LARGE for SPLIT and
     STRIP, SMALL / NORMAL for the classic split and strip, hidden for
     CLASSIC and NONE; FACE (BJ's face in the pills), ON / OFF, only for
-    SPLIT and STRIP; HUD, the HUD's opacity (`iosTouchHudOpacity`);
-    BUTTONS, the controls' (`iosTouchOpacity`): sliders 20-100% in 5%
+    SPLIT and STRIP; HUD, the HUD's opacity (`iosTouchHudOpacity`),
+    hidden for CLASSIC and NONE; BUTTONS, the controls'
+    (`iosTouchOpacity`), always shown: sliders 20-100% in 5%
     steps, live, saved on lift, the value at the right. Hidden rows close
-    up (3 to 5 rows). Chips are rounded (radius 15): the chosen one gold
+    up (2 to 5 rows). Chips are rounded (radius 15): the chosen one gold
     (fill 1, 0.75, 0.24 at 45%, a solid gold border), the others white at
     10% with a 45% white border; a tap applies at once (a light selection
     haptic; FIRE and USE move with the HUD). A tap on a row's name resets
