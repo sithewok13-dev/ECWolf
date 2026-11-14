@@ -86,8 +86,8 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   groups` (areas with 3+ enemies), `cam gather n`;
   `@CAMERA`, `@TRAYCAM`; photos in `$IOSCAM_DIR`; `cam hash` (actors,
   map, clock, every RNG) is printed before and after each held stage.
-- **HUD** (tray's HUD: SPLIT -> STRIP -> CLASSIC SPLIT -> CLASSIC STRIP
-  -> CLASSIC -> NONE, default SPLIT, tap only; FACE on/off, default on;
+- **HUD** (the tray's HUD panel's LOOK: SPLIT, STRIP, CLASSIC SPLIT,
+  CLASSIC STRIP, CLASSIC, NONE, default SPLIT; FACE on/off, default on;
   NSUserDefaults `iosTouchHud` (SPLIT 0, STRIP 1, CLASSIC 2, NONE 3,
   CLASSIC SPLIT 4, CLASSIC STRIP 5), `iosTouchHudFace`; the owner's
   approved mockups, from the UZDoom port's): all but CLASSIC give the 3D
@@ -109,7 +109,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   nothing. Warnings: health under 25 red, with a red glow pulsing twice a
   second (and the game's own bloodied face); ammo red strictly below 25%
   of its maximum, or at 0.
-  SIZE (no tray control yet; rig `hudsize`): the pills small (30.6 pt of a
+  SIZE (the HUD panel's SIZE row): the pills small (30.6 pt of a
   440 pt screen, the mockups'), medium (39.8 pt, 83 px at 2000x921,
   default) or large (1.3x medium), `iosTouchHudSize` 0-2; the CLASSIC
   SPLIT / STRIP bars normal (the game's own scale, default) or small
@@ -125,7 +125,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   RGB, put back as the palette's nearest colours; the game's own graphics
   at run time (FONTN048.. digits, the % cut from STBACK, MEDIA0, ONUPA0,
   STKEYS1-4, the weapon's icon, the mugshot `gamestate.faceframe` keyed out
-  of its panel), nothing in the repo. The HUD's strength is OPACITY's HUD
+  of its panel), nothing in the repo. The HUD's strength is the HUD panel's HUD
   slider (`iosTouchHudOpacity`, 20-100%): it fades the pills and their
   contents, and CLASSIC's status bar into the view's border
   (`IOSHud_StatusBarFadeBegin/End` around `WolfStatusBar::DrawStatusBar`).
@@ -217,8 +217,11 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   exits 3. Script lines: `frame <n>`, `wait <n>`, `waitplay` (until a
   level is being played), touches (`down/move/up <id> <x y | @BUTTON>`,
   e.g. `@SAVE`, `@TRAYCHEAT`, `@TRAYHUD`; `tapslice`, `state`, `levels`,
-  `level <i>`; `hud <split|strip|csplit|cstrip|classic|none> [face]`, `hudsize <small|medium|large|normal>`, `opacityslide
-  <buttons|hud> <0.2-1>` on the open OPACITY panel; the HUD's settings in
+  `level <i>`; `hud <split|strip|csplit|cstrip|classic|none> [face]`, `hudsize <small|medium|large|normal>`; on the open
+  HUD panel (`@TRAYHUD` tapped) `opacityslide <buttons|hud> <0.2-1>`,
+  `hudpick <row> <choice>` (a chip: row 0 LOOK 0-5, 1 SIZE 0-2, 2 FACE 0
+  on 1 off), `hudreset <row>` (a row's name: 0 LOOK .. 3 HUD, 4 BUTTONS),
+  `hudpanel` (open, rect, rows shown); the HUD's settings in
   `$HOME/.iosrig-hud`), `pos`, `key <SDL name>`, `shot <png>` (ImageMagick
   `import`), `rigset health n | ammo n | all | weapon i` (rig only: the
   HUD's warnings and contents), `quit`.
@@ -254,10 +257,10 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     cancels; SAVE wins a tie (LOAD's tap does nothing while SAVE is held);
     only a finished hold saves or loads.
   - MENU: tap = game menu; hold 0.45 s = tray with LOOK, ALWAYS RUN,
-    OPACITY, HUD, FACE, FPS, CAMERA, CHEAT, LEVEL (in a level, single
-    player), GAMES (more than one game found), keyboard, and the build
-    stamp under it in small dim text (not a button; hidden while OPACITY's
-    panel is open).
+    HUD, FPS, CAMERA, CHEAT, LEVEL (in a level, single player), GAMES
+    (more than one game found), keyboard, and the build stamp under it in
+    small dim text (not a button; hidden while HUD's panel is open). No
+    OPACITY, FACE or SIZE buttons: they are in HUD's panel.
   - LOOK (tray): the drag's turning speed, shown on it ("LOOK 1x"); a tap
     steps 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3x (round to 0.5x); held 0.45 s
     (ring) back to 1x (build 2's speed) with a toast and a haptic.
@@ -268,14 +271,31 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     shows with the stick; the thumb slid up onto it runs straight ahead (a
     haptic tick, the knob on the marker, lit blue). On: no marker, the stick
     always runs.
-  - OPACITY (tray): tap = a panel under the tray (`IOSTouch_OpacityPanel`)
-    with two sliders, BUTTONS (the controls: `iosTouchOpacity`) and HUD (the
-    game's HUD: `iosTouchHudOpacity`), each 20% to 100% in 5% steps, live,
-    saved on lift, default 100%; hold = both back to 100% (toast, haptic).
-    The tray and the wheel stay at full.
-  - HUD (tray): tap = the next look (SPLIT, STRIP, CLASSIC, NONE; "HUD\n
-    SPLIT"); FACE (tray): BJ's face in the pills on/off (lit while on, dim
-    outside SPLIT and STRIP). See **HUD** above.
+  - HUD (tray; the owner's design, shared standard): its label is the
+    look ("HUD\nSPLIT", "HUD\nSTRIP", "CLASSIC\nSPLIT", "CLASSIC\nSTRIP",
+    "HUD\nCLASSIC", "HUD\nNONE"), lit while its panel is open. Tap = the
+    panel under the tray (`IOSTouch_OpacityPanel`, where OPACITY's was):
+    dark translucent, rounded, a 1.5 pt white border at 40%, 560 pt wide
+    kept inside the safe area, rows of 40 pt, each its name at the left
+    (78 pt) then: LOOK, six chips (SPLIT, STRIP, CLASSIC SPLIT, CLASSIC
+    STRIP, CLASSIC, NONE); SIZE, SMALL / MEDIUM / LARGE for SPLIT and
+    STRIP, SMALL / NORMAL for the classic split and strip, hidden for
+    CLASSIC and NONE; FACE (BJ's face in the pills), ON / OFF, only for
+    SPLIT and STRIP; HUD, the HUD's opacity (`iosTouchHudOpacity`);
+    BUTTONS, the controls' (`iosTouchOpacity`): sliders 20-100% in 5%
+    steps, live, saved on lift, the value at the right. Hidden rows close
+    up (3 to 5 rows). Chips are rounded (radius 15): the chosen one gold
+    (fill 1, 0.75, 0.24 at 45%, a solid gold border), the others white at
+    10% with a 45% white border; a tap applies at once (a light selection
+    haptic; FIRE and USE move with the HUD). A tap on a row's name resets
+    that row (LOOK split, SIZE medium / normal, FACE on, a slider 100%)
+    with a toast and a haptic. HUD held 0.45 s (ring) = everything back
+    (split, medium, face on, both 100%), "HUD back to the defaults: split,
+    medium, face on, both opacities 100%", a haptic, the panel closes.
+    The tray and the wheel always stay fully opaque. C core:
+    `IOSTouch_HudPick`, `IOSTouch_HudRowReset`, `IOSTouch_HudResetAll`,
+    `IOSTouch_HudRowShown`; the view's `layoutHudPanel`, `hudChipTapped:`,
+    `hudRowNameTapped:` (from the DOOM port's). See **HUD** above.
   - FPS (tray): tap = show/hide the FPS readout. Wolf3D differs from the
     other ports here (the owner's call): no 60/120 switch, no hold action,
     the label just "FPS"; the game runs at a fixed 60.

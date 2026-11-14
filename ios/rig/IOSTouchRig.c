@@ -19,13 +19,19 @@
      tapslice <i>               a tap on the open wheel's slice i
      state                      what shows, the wheel, the tray, the stick, the cheat
      levels / level <i>         the cheat's list of levels / a tap on row i
-     hud <style> [face]         the tray's HUD (split, strip, csplit, cstrip,
+     hud <style> [face]         the HUD panel's LOOK (split, strip, csplit, cstrip,
                                 classic, none) and FACE (0/1), kept as the tray
                                 keeps them
      hudsize <size>             SIZE: the pills small, medium, large; the classic
                                 bars (CLASSIC SPLIT / STRIP) small, normal
      opacityslide <buttons|hud> <0.2-1>
-                                a slider of the open OPACITY panel moved and let go
+                                a slider of the open HUD panel moved and let go
+     hudpick <row> <choice>     a chip of the open HUD panel tapped (row 0 LOOK:
+                                0 split .. 5 none; 1 SIZE: 0 small, 1 medium or
+                                normal, 2 large; 2 FACE: 0 on, 1 off)
+     hudreset <row>             a row's name tapped (0 LOOK, 1 SIZE, 2 FACE,
+                                3 HUD, 4 BUTTONS): that row's default
+     hudpanel                   the HUD panel: open, its rect, the rows shown
 
    The phone: IOSRIG_SCREEN="<W> <H> <scale> <bottom inset> [<side inset>]"
    (points; as ios/IOSGame.cpp reads it), else the iPhone 14's 844 x 390.
@@ -176,7 +182,7 @@ static const struct { const char *name; int button; } _aRigNames[] = {
   { "NEXTWPN", BTN_NEXTWPN }, { "SAVE", BTN_QUICKSAVE }, { "LOAD", BTN_QUICKLOAD },
   { "MENU", BTN_MENU }, { "RESUME", BTN_RESUME }, { "BACK", BTN_BACK }, { "MENUUP", BTN_MENUUP },
   { "MENUDOWN", BTN_MENUDOWN }, { "TRAYLOOK", BTN_TRAYLOOK }, { "TRAYRUN", BTN_TRAYRUN },
-  { "TRAYOPACITY", BTN_TRAYOPACITY }, { "TRAYHUD", BTN_TRAYHUD }, { "TRAYFACE", BTN_TRAYFACE }, { "TRAYFPS", BTN_TRAYFPS }, { "TRAYCHEAT", BTN_TRAYCHEAT },
+  { "TRAYHUD", BTN_TRAYHUD }, { "TRAYFPS", BTN_TRAYFPS }, { "TRAYCHEAT", BTN_TRAYCHEAT },
   { "TRAYLEVEL", BTN_TRAYLEVEL }, { "CAMERA", BTN_CAMERA }, { "TRAYCAM", BTN_TRAYCAM }, { "TRAYGAMES", BTN_TRAYGAMES }, { "TRAYKEYS", BTN_TRAYKEYS },
 };
 
@@ -373,6 +379,27 @@ void IOSTouchRig_Command(const char *cmd)
     if (bOpen && !strcasecmp(argv[1], "hud")) IOSTouch_SetHudOpacity((float)atof(argv[2]), 1);
     else if (bOpen) _fOpacity = IOSTouch_OpacityStep((float)atof(argv[2]));
     printf("rig: opacityslide %s %s (panel %d) -> buttons %.2f hud %.2f\n", argv[1], argv[2], bOpen, (double)_fOpacity, (double)_fHudOpacity);
+  }
+  else if (!strcmp(op, "hudpick") && argc >= 3) {
+    // as the view's chips: only while the panel is open
+    if (_bOpacityOpen && _bTrayOpen) IOSTouch_HudPick(atoi(argv[1]), atoi(argv[2]));
+    printf("rig: hudpick %s %s (panel %d) -> style %d size %d bar %d face %d rows %d\n", argv[1], argv[2], _bOpacityOpen && _bTrayOpen,
+           _iHudStyle, _iHudSize, _iHudBarSize, _bHudFace, IOSTouch_HudRowsShown());
+  }
+  else if (!strcmp(op, "hudreset") && argc >= 2) {
+    if (_bOpacityOpen && _bTrayOpen) IOSTouch_HudRowReset(atoi(argv[1]));
+    printf("rig: hudreset %s -> style %d size %d bar %d face %d hud %.2f buttons %.2f resets %d\n", argv[1],
+           _iHudStyle, _iHudSize, _iHudBarSize, _bHudFace, (double)_fHudOpacity, (double)_fOpacity, _ctHudResets);
+  }
+  else if (!strcmp(op, "hudpanel")) {
+    static const char *const astrRows[IOSTOUCH_HUDROWS] = { "LOOK", "SIZE", "FACE", "HUD", "BUTTONS" };
+    const IOSTouchRect r = IOSTouch_OpacityPanel();
+    printf("rig: hudpanel open %d rect %.0f,%.0f-%.0f,%.0f (%.0f x %.0f) rows", _bOpacityOpen && _bTrayOpen, r.x0, r.y0, r.x1, r.y1,
+           r.x1 - r.x0, r.y1 - r.y0);
+    for (int i = 0; i < IOSTOUCH_HUDROWS; i++) if (IOSTouch_HudRowShown(i)) printf(" %s", astrRows[i]);
+    printf(" | style %d size %d bar %d face %d hud %.2f buttons %.2f | HUD button %.1f,%.1f r %.0f | tray %.0f,%.0f-%.0f,%.0f\n", _iHudStyle, _iHudSize,
+           _iHudBarSize, _bHudFace, (double)_fHudOpacity, (double)_fOpacity, _aButtons[BTN_TRAYHUD].x, _aButtons[BTN_TRAYHUD].y,
+           _aButtons[BTN_TRAYHUD].radius, _rTrayBack.x0, _rTrayBack.y0, _rTrayBack.x1, _rTrayBack.y1);
   }
   else if (!strcmp(op, "state")) {
     IOSTouchRig_State();
