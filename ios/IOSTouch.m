@@ -434,14 +434,15 @@ static IOSTouchRect _rMessages;
 // IOSTouch_SaveHudPrefs: the view's NSUserDefaults, the rig's file). The
 // game draws it (wolf_sbar.cpp) where IOSTouch_GetHudLayout says. The
 // pills' sizes are the approved mockups' (2000 x 921 pixels of a 956 x 440
-// point screen) made 1.3x larger (the owner's "large", the only size), as
-// the UZDoom port's, scaled with the screen's height (one size for every
-// phone and iPad: 0.8 to 1.25 of it): 83 px high, 34 px
-// above the bottom where there's a home indicator (but inside the game's
-// picture, which stops above it), 2.4 pt in from the HUD frame's sides. In
-// SPLIT, FIRE and USE sit IOSTOUCH_PILL_CLEAR above them; in CLASSIC,
-// above the game's status bar.
-#define IOSTOUCH_PILL_H 39.8 // (the mockups' 30.6, 1.3x)
+// point screen), as the UZDoom port's: SIZE medium (the default) 1.3x the
+// mockups' (83 px high), small the mockups' own, large 1.3x medium; scaled
+// with the screen's height (0.8 to 1.25 of it), 34 px above the bottom
+// where there's a home indicator (but inside the game's picture, which
+// stops above it), 2.4 pt in from the HUD frame's sides. In SPLIT and
+// STRIP, FIRE and USE sit IOSTOUCH_PILL_CLEAR above them; in CLASSIC,
+// CLASSIC SPLIT and CLASSIC STRIP, IOSTOUCH_BAR_CLEAR above the status
+// bar's top as the game drew it (IOSTouchHud.fStatusTop).
+#define IOSTOUCH_PILL_H 39.8 // (MEDIUM: the mockups' 30.6, which is SMALL, 1.3x; LARGE 1.3x again)
 #define IOSTOUCH_PILL_REF_H 440.0
 #define IOSTOUCH_PILL_BOTTOM 16.3
 #define IOSTOUCH_PILL_BOTTOM_BARE 8.0 // (no home indicator)
@@ -449,7 +450,19 @@ static IOSTouchRect _rMessages;
 #define IOSTOUCH_PILL_EDGE 2.4
 #define IOSTOUCH_PILL_EDGE_MIN 10.0
 #define IOSTOUCH_PILL_CLEAR 14.0
+#define IOSTOUCH_BAR_CLEAR 10.0
 static int _iHudStyle = IOSTOUCH_HUD_SPLIT, _bHudFace = 1, _bHudPrefsLoaded = 0;
+// SIZE: the pills' (SPLIT, STRIP: 0 small, 1 medium, 2 large) and the
+// classic bars' (CLASSIC SPLIT, CLASSIC STRIP: 0 small, 1 normal), each
+// remembered; medium and normal unless changed
+static int _iHudSize = 1, _iHudBarSize = 1;
+static const double _afPillSize[3] = { 30.6 / 39.8, 1.0, 1.3 };
+#define IOSTOUCH_BAR_SMALL 0.75
+static int IOSTouch_HudIsPills(int style) { return style == IOSTOUCH_HUD_SPLIT || style == IOSTOUCH_HUD_STRIP; }
+static int IOSTouch_HudIsBar(int style)
+{
+  return style == IOSTOUCH_HUD_CLASSIC || style == IOSTOUCH_HUD_CSPLIT || style == IOSTOUCH_HUD_CSTRIP;
+}
 static float _fHudOpacity = 1.0f;
 static void IOSTouch_LoadHudPrefs(void); // (the view's, the rig's)
 static void IOSTouch_SaveHudPrefs(void);
@@ -460,6 +473,8 @@ static void IOSTouch_HudPrefs(void)
   IOSTouch_LoadHudPrefs();
   if (_iHudStyle < 0 || _iHudStyle >= IOSTOUCH_HUD_COUNT) _iHudStyle = IOSTOUCH_HUD_SPLIT;
   _bHudFace = _bHudFace != 0;
+  if (_iHudSize < 0 || _iHudSize > 2) _iHudSize = 1;
+  if (_iHudBarSize < 0 || _iHudBarSize > 1) _iHudBarSize = 1;
   if (!(_fHudOpacity >= 0.2f && _fHudOpacity <= 1.0f)) _fHudOpacity = 1.0f;
 }
 
@@ -534,7 +549,7 @@ static void IOSTouch_PillGeometry(double W, double H, double inLeft, double inTo
   *pfBottom = H - (inBottom > 0.0 ? IOSTOUCH_PILL_BOTTOM : IOSTOUCH_PILL_BOTTOM_BARE);
   if (_hud.fPictureBottom > 0.5f && _hud.fPictureBottom <= 1.0f)
     *pfBottom = fmin(*pfBottom, _hud.fPictureBottom * H - IOSTOUCH_PILL_PICTURE_GAP);
-  *pfTop = *pfBottom - IOSTOUCH_PILL_H * k;
+  *pfTop = *pfBottom - IOSTOUCH_PILL_H * k * _afPillSize[_iHudSize];
   *pfLeft = fmax(fl + IOSTOUCH_PILL_EDGE, IOSTOUCH_PILL_EDGE_MIN);
   *pfRight = W - fmax(fr + IOSTOUCH_PILL_EDGE, IOSTOUCH_PILL_EDGE_MIN);
 }
@@ -545,11 +560,12 @@ static void IOSTouch_PillGeometry(double W, double H, double inLeft, double inTo
 // again
 static float _fLaidStatusTop = 0.0f, _fLaidPictureBottom = 0.0f;
 static int _iLaidHudStyle = -1;
+static int IOSTouch_HudKey(void) { return _iHudStyle + 8 * (_iHudSize + 3 * _iHudBarSize); }
 static int IOSTouch_StatusTopMoved(void)
 {
   IOSTouch_HudPrefs();
   return fabsf(_hud.fStatusTop - _fLaidStatusTop) > 0.002f || fabsf(_hud.fPictureBottom - _fLaidPictureBottom) > 0.002f
-         || _iLaidHudStyle != _iHudStyle;
+         || _iLaidHudStyle != IOSTouch_HudKey();
 }
 
 // The screen's usable edges (points), as the last layout had them: the run
@@ -574,19 +590,20 @@ static void IOSTouch_LayoutButtons(double W, double H, double inLeft, double inT
   // FIRE in the corner, above the home indicator (further in without side
   // insets: a screen with square corners) and above the game's status bar
   // (in the 3D view's lower right), but no higher than the middle; with
-  // the HUD SPLIT, IOSTOUCH_PILL_CLEAR above its pills
+  // the pills (SPLIT, STRIP), IOSTOUCH_PILL_CLEAR above them; the status
+  // bars (CLASSIC, CLASSIC SPLIT, CLASSIC STRIP), IOSTOUCH_BAR_CLEAR above
   const double FR = _aButtons[BTN_FIRE].radius;
   const double fireX = right - (inRight < 20.0 ? 100 : 76);
   double fireY = bottom - 58;
   IOSTouch_HudPrefs();
   _fLaidStatusTop = _hud.fStatusTop;
   _fLaidPictureBottom = _hud.fPictureBottom;
-  _iLaidHudStyle = _iHudStyle;
+  _iLaidHudStyle = IOSTouch_HudKey();
   double pillTop, pillBottom, pillLeft, pillRight;
   IOSTouch_PillGeometry(W, H, inLeft, inTop, inRight, inBottom, &pillTop, &pillBottom, &pillLeft, &pillRight);
-  if (_iHudStyle == IOSTOUCH_HUD_SPLIT) fireY = fmin(fireY, pillTop - IOSTOUCH_PILL_CLEAR - FR);
-  else if (_iHudStyle == IOSTOUCH_HUD_CLASSIC && _hud.fStatusTop > 0.3f && _hud.fStatusTop < 1.0f)
-    fireY = fmax(fmin(fireY, _hud.fStatusTop * H - 8 - FR), H * 0.5);
+  if (IOSTouch_HudIsPills(_iHudStyle)) fireY = fmin(fireY, pillTop - IOSTOUCH_PILL_CLEAR - FR);
+  else if (IOSTouch_HudIsBar(_iHudStyle) && _hud.fStatusTop > 0.3f && _hud.fStatusTop < 1.0f)
+    fireY = fmax(fmin(fireY, _hud.fStatusTop * H - IOSTOUCH_BAR_CLEAR - FR), H * 0.5);
   _aButtons[BTN_FIRE].x = fireX;
   _aButtons[BTN_FIRE].y = fireY;
 
@@ -604,8 +621,8 @@ static void IOSTouch_LayoutButtons(double W, double H, double inLeft, double inT
   _fSafeRight = right;
   _fSafeBottom = bottom;
 
-  // The pills (the game draws them): STRIP's, in the middle, keeps 6 pt
-  // clear of FIRE and USE where they reach down beside it
+  // The pills (the game draws them): STRIP's, in the middle, as wide as the
+  // HUD frame lets it (FIRE and USE are above it, as with SPLIT)
   {
     _fPillTop = pillTop;
     _fPillBottom = pillBottom;
@@ -613,14 +630,7 @@ static void IOSTouch_LayoutButtons(double W, double H, double inLeft, double inT
     _fPillRight = pillRight;
     _fPillW = W;
     _fPillScreenH = H;
-    double half = fmin(W * 0.5 - pillLeft, pillRight - W * 0.5);
-    const int aCluster[2] = { BTN_FIRE, BTN_USE };
-    for (int i = 0; i < 2; i++) {
-      const IOSTouchButton *c = &_aButtons[aCluster[i]];
-      if (c->y + c->radius < pillTop - 2.0) continue;
-      half = fmin(half, fabs(c->x - W * 0.5) - c->radius - 6.0);
-    }
-    _fStripHalf = fmax(half, 40.0);
+    _fStripHalf = fmax(fmin(W * 0.5 - pillLeft, pillRight - W * 0.5), 40.0);
   }
 
   // Top left: NEXT WPN, then MAP (in the menus, BACK), below the score box
@@ -764,8 +774,9 @@ void IOSTouch_GetHudLayout(IOSTouchHudLayout *p)
   p->iStyle = _iHudStyle;
   p->bFace = _bHudFace;
   p->fAlpha = _fHudOpacity;
+  p->fBarScale = (float)(_iHudBarSize ? 1.0 : IOSTOUCH_BAR_SMALL);
   if (_fPillW <= 0.0 || _fPillScreenH <= 0.0) {
-    p->fPillH = (float)(IOSTOUCH_PILL_H / IOSTOUCH_PILL_REF_H);
+    p->fPillH = (float)(IOSTOUCH_PILL_H * _afPillSize[_iHudSize] / IOSTOUCH_PILL_REF_H);
     p->fPillBottom = (float)(1.0 - IOSTOUCH_PILL_BOTTOM / IOSTOUCH_PILL_REF_H);
     p->fLeft = 0.023f;
     p->fRight = 0.977f;
@@ -1198,12 +1209,18 @@ static void IOSTouch_UseTrayButton(int button)
   }
   else if (kind == KIND_HUDSTYLE || kind == KIND_HUDFACE) {
     // the HUD: at once (the game draws it as it says; the buttons laid out
-    // again for it), kept; the tray stays, for another tap
+    // again for it), kept; the tray stays, for another tap. The looks in
+    // turn: SPLIT, STRIP, CLASSIC SPLIT, CLASSIC STRIP, CLASSIC, NONE
     static const char *const astrHud[IOSTOUCH_HUD_COUNT] = {
-      "HUD: split, BJ left, gun and keys right", "HUD: strip, all in the middle", "HUD: classic status bar", "HUD: none" };
+      "HUD: split, BJ left, gun and keys right", "HUD: strip, all in the middle", "HUD: classic status bar", "HUD: none",
+      "HUD: classic split, the bar in two", "HUD: classic strip, the bar over the view" };
+    static const int aiNext[IOSTOUCH_HUD_COUNT] = {
+      [IOSTOUCH_HUD_SPLIT] = IOSTOUCH_HUD_STRIP, [IOSTOUCH_HUD_STRIP] = IOSTOUCH_HUD_CSPLIT,
+      [IOSTOUCH_HUD_CSPLIT] = IOSTOUCH_HUD_CSTRIP, [IOSTOUCH_HUD_CSTRIP] = IOSTOUCH_HUD_CLASSIC,
+      [IOSTOUCH_HUD_CLASSIC] = IOSTOUCH_HUD_NONE, [IOSTOUCH_HUD_NONE] = IOSTOUCH_HUD_SPLIT };
     IOSTouch_HudPrefs();
     if (kind == KIND_HUDSTYLE) {
-      _iHudStyle = (_iHudStyle + 1) % IOSTOUCH_HUD_COUNT;
+      _iHudStyle = aiNext[_iHudStyle];
       IOSTouch_Message(astrHud[_iHudStyle]);
     }
     else {
@@ -3219,6 +3236,8 @@ void IOSTouch_TakeLook(float *pfDX, float *pfDY)
 #define IOSTOUCH_HUD_DEFAULTS_KEY @"iosTouchHud"
 #define IOSTOUCH_HUDFACE_DEFAULTS_KEY @"iosTouchHudFace"
 #define IOSTOUCH_HUDOPACITY_DEFAULTS_KEY @"iosTouchHudOpacity"
+#define IOSTOUCH_HUDSIZE_DEFAULTS_KEY @"iosTouchHudSize"
+#define IOSTOUCH_HUDBARSIZE_DEFAULTS_KEY @"iosTouchHudBarSize"
 
 static void IOSTouch_LoadHudPrefs(void)
 {
@@ -3226,6 +3245,8 @@ static void IOSTouch_LoadHudPrefs(void)
   if ([d objectForKey:IOSTOUCH_HUD_DEFAULTS_KEY]) _iHudStyle = (int)[d integerForKey:IOSTOUCH_HUD_DEFAULTS_KEY];
   if ([d objectForKey:IOSTOUCH_HUDFACE_DEFAULTS_KEY]) _bHudFace = [d boolForKey:IOSTOUCH_HUDFACE_DEFAULTS_KEY] ? 1 : 0;
   if ([d objectForKey:IOSTOUCH_HUDOPACITY_DEFAULTS_KEY]) _fHudOpacity = IOSTouch_OpacityStep([d floatForKey:IOSTOUCH_HUDOPACITY_DEFAULTS_KEY]);
+  if ([d objectForKey:IOSTOUCH_HUDSIZE_DEFAULTS_KEY]) _iHudSize = (int)[d integerForKey:IOSTOUCH_HUDSIZE_DEFAULTS_KEY];
+  if ([d objectForKey:IOSTOUCH_HUDBARSIZE_DEFAULTS_KEY]) _iHudBarSize = (int)[d integerForKey:IOSTOUCH_HUDBARSIZE_DEFAULTS_KEY];
 }
 
 static void IOSTouch_SaveHudPrefs(void)
@@ -3234,6 +3255,8 @@ static void IOSTouch_SaveHudPrefs(void)
   [d setInteger:_iHudStyle forKey:IOSTOUCH_HUD_DEFAULTS_KEY];
   [d setBool:(_bHudFace ? YES : NO) forKey:IOSTOUCH_HUDFACE_DEFAULTS_KEY];
   [d setFloat:_fHudOpacity forKey:IOSTOUCH_HUDOPACITY_DEFAULTS_KEY];
+  [d setInteger:_iHudSize forKey:IOSTOUCH_HUDSIZE_DEFAULTS_KEY];
+  [d setInteger:_iHudBarSize forKey:IOSTOUCH_HUDBARSIZE_DEFAULTS_KEY];
 }
 
 // The build stamp from the Info.plist keys CI writes (SWBuildNumber, and
@@ -3911,7 +3934,8 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
   // the HUD's ("HUD\nSPLIT", "FACE\nON")
   IOSTouch_HudPrefs();
   if (iHudLabels != _iHudStyle + 8 * _bHudFace) {
-    static NSString *const astrHud[IOSTOUCH_HUD_COUNT] = { @"HUD\nSPLIT", @"HUD\nSTRIP", @"HUD\nCLASSIC", @"HUD\nNONE" };
+    static NSString *const astrHud[IOSTOUCH_HUD_COUNT] = { @"HUD\nSPLIT", @"HUD\nSTRIP", @"HUD\nCLASSIC", @"HUD\nNONE",
+                                                          @"CLASSIC\nSPLIT", @"CLASSIC\nSTRIP" };
     iHudLabels = _iHudStyle + 8 * _bHudFace;
     aButtonViews[BTN_TRAYHUD].text = astrHud[_iHudStyle];
     aButtonViews[BTN_TRAYFACE].text = _bHudFace ? @"FACE\nON" : @"FACE\nOFF";

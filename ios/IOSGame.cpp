@@ -52,6 +52,7 @@
 
 #include "IOSGame.h"
 #include "IOSCamera.h"
+#include "IOSHud.h"
 #ifdef ECWOLF_IOS
 #include "IOSPicker.h"
 #endif
@@ -199,6 +200,11 @@ bool IOSGame_PictureRect(SDL_Window *pWindow, int outW, int outH, int texW, int 
 // from its top; 0: no status bar): FIRE and USE keep above it
 static float StatusTop()
 {
+	// (CLASSIC SPLIT / STRIP: the bar's top where IOSHud.cpp drew it)
+	IOSTouchHudLayout hl;
+	IOSTouch_GetHudLayout(&hl);
+	if(hl.iStyle == IOSTOUCH_HUD_CSPLIT || hl.iStyle == IOSTOUCH_HUD_CSTRIP)
+		return IOSHud_BarTop();
 	if(viewsize >= 21 || screenHeight <= 0 || statusbary2 <= 0 || (unsigned)statusbary2 >= screenHeight || lastPicture[5] <= 0)
 		return 0;
 	return (float)((lastPicture[1] + (double)statusbary2 * lastPicture[3] / screenHeight) / lastPicture[5]);
@@ -960,7 +966,8 @@ void IOSGame_Frame()
 
 // The touch HUD's view (IOSTouch.h's IOSTOUCH_HUD_*): CLASSIC keeps ECWolf's
 // status bar (view size 20), the others give the 3D view the whole screen
-// (21: no status bar; SPLIT and STRIP draw their pills over it, IOSHud.cpp)
+// (21: no status bar; SPLIT and STRIP draw their pills over it, CLASSIC
+// SPLIT and STRIP the status bar without its border, IOSHud.cpp)
 static void HudViewSize()
 {
 	IOSTouchHudLayout hl;

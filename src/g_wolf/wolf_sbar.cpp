@@ -559,6 +559,12 @@ void WolfStatusBar::DrawStatusBar()
 #endif
 }
 
+#ifdef ECWOLF_TOUCH
+// (the touch HUD's CLASSIC SPLIT: the bar cut between the face and health)
+int IOSHud_BarFaceRight() { return StatusBarConfig.Mugshot.X + 24; }
+int IOSHud_BarHealthLeft() { return StatusBarConfig.Health.X; }
+#endif
+
 //===========================================================================
 
 void WolfStatusBar::SetupStatusbar()

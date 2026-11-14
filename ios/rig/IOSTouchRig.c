@@ -19,8 +19,11 @@
      tapslice <i>               a tap on the open wheel's slice i
      state                      what shows, the wheel, the tray, the stick, the cheat
      levels / level <i>         the cheat's list of levels / a tap on row i
-     hud <style> [face]         the tray's HUD (split, strip, classic, none) and
-                                FACE (0/1), kept as the tray keeps them
+     hud <style> [face]         the tray's HUD (split, strip, csplit, cstrip,
+                                classic, none) and FACE (0/1), kept as the tray
+                                keeps them
+     hudsize <size>             SIZE: the pills small, medium, large; the classic
+                                bars (CLASSIC SPLIT / STRIP) small, normal
      opacityslide <buttons|hud> <0.2-1>
                                 a slider of the open OPACITY panel moved and let go
 
@@ -58,7 +61,7 @@ static void IOSTouchRig_Screen(void)
 }
 
 // The HUD's settings (the view's NSUserDefaults): a file, $HOME/.iosrig-hud
-// ("style face hud-strength")
+// ("style face hud-strength pills'-size bars'-size")
 static void IOSTouchRig_HudPrefsPath(char *path, size_t size)
 {
   const char *home = getenv("HOME");
@@ -73,12 +76,15 @@ static void IOSTouch_LoadHudPrefs(void)
   if (f) {
     int style = 0, face = 1;
     float k = 1.0f;
-    const int n = fscanf(f, "%d %d %f", &style, &face, &k);
+    int size = 1, barSize = 1;
+    const int n = fscanf(f, "%d %d %f %d %d", &style, &face, &k, &size, &barSize);
     if (n >= 2) {
       _iHudStyle = style;
       _bHudFace = face;
     }
     if (n >= 3) _fHudOpacity = IOSTouch_OpacityStep(k);
+    if (n >= 4) _iHudSize = size;
+    if (n >= 5) _iHudBarSize = barSize;
     fclose(f);
   }
   printf("rig: hud prefs loaded: style %d face %d hud %.2f\n", _iHudStyle, _bHudFace, (double)_fHudOpacity);
@@ -90,7 +96,7 @@ static void IOSTouch_SaveHudPrefs(void)
   IOSTouchRig_HudPrefsPath(path, sizeof(path));
   FILE *f = fopen(path, "w");
   if (!f) return;
-  fprintf(f, "%d %d %.2f\n", _iHudStyle, _bHudFace, (double)_fHudOpacity);
+  fprintf(f, "%d %d %.2f %d %d\n", _iHudStyle, _bHudFace, (double)_fHudOpacity, _iHudSize, _iHudBarSize);
   fclose(f);
 }
 
@@ -340,7 +346,7 @@ void IOSTouchRig_Command(const char *cmd)
     }
   }
   else if (!strcmp(op, "hud") && argc >= 2) {
-    static const char *const astr[IOSTOUCH_HUD_COUNT] = { "split", "strip", "classic", "none" };
+    static const char *const astr[IOSTOUCH_HUD_COUNT] = { "split", "strip", "classic", "none", "csplit", "cstrip" };
     IOSTouch_HudPrefs();
     for (int i = 0; i < IOSTOUCH_HUD_COUNT; i++) {
       if (!strcasecmp(argv[1], astr[i])) _iHudStyle = i;
@@ -348,6 +354,18 @@ void IOSTouchRig_Command(const char *cmd)
     if (argc >= 3) _bHudFace = atoi(argv[2]) != 0;
     IOSTouch_SaveHudPrefs();
     printf("rig: hud %s face %d\n", astr[_iHudStyle], _bHudFace);
+  }
+  else if (!strcmp(op, "hudsize") && argc >= 2) {
+    IOSTouch_HudPrefs();
+    if (!strcasecmp(argv[1], "small")) {
+      if (IOSTouch_HudIsBar(_iHudStyle)) _iHudBarSize = 0;
+      else _iHudSize = 0;
+    }
+    else if (!strcasecmp(argv[1], "medium")) _iHudSize = 1;
+    else if (!strcasecmp(argv[1], "large")) _iHudSize = 2;
+    else if (!strcasecmp(argv[1], "normal")) _iHudBarSize = 1;
+    IOSTouch_SaveHudPrefs();
+    printf("rig: hudsize pills %d bars %d\n", _iHudSize, _iHudBarSize);
   }
   else if (!strcmp(op, "opacityslide") && argc >= 3) {
     // as the view's sliders: only while the panel is open; kept as it lifts

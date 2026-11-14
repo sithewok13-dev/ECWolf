@@ -4,8 +4,11 @@
 // extra life and lives; the gun in hand in light grey, its ammo, the keys),
 // where the touch controls say (IOSTouch_GetHudLayout: the owner's approved
 // mockups, the UZDoom port's sizes), so the HUD and FIRE and USE agree.
-// CLASSIC is ECWolf's own status bar, faded by the HUD slider
-// (IOSHud_FadeStatusBar). Everything is made at run time from the
+// CLASSIC SPLIT and CLASSIC STRIP are ECWolf's own status bar (its 320
+// wide picture, none of the border beside it) drawn over the full-screen
+// view: cut after BJ's face to the two bottom corners, or whole in the
+// middle (DrawBar). CLASSIC is ECWolf's own status bar, faded by the HUD
+// slider (IOSHud_StatusBarFadeBegin / End). Everything is made at run time from the
 // player's own data; nothing of it is in the repository.
 //
 // ECWolf draws in 8 bits: the pills are composed in RGB over the frame and
@@ -690,13 +693,138 @@ struct Map
 	double Y(double f) const { return (f * outH - oy) * ky; }
 };
 
+// CLASSIC SPLIT / STRIP: the bar's top as last drawn (a fraction of the
+// screen's height; 0: none), for FIRE and USE to keep above
+float barTop = 0;
+
+// The bar's last column (of its 320) in CLASSIC SPLIT's left part: after the
+// face's box, half way to the health's (Wolf3D and Spear: 164)
+int BarCut()
+{
+	const int face = IOSHud_BarFaceRight(), health = IOSHud_BarHealthLeft();
+	if(face > 0 && health > face && health < 320)
+		return (face + health) / 2;
+	return 164;
+}
+
+// CLASSIC SPLIT / STRIP: the status bar drawn where it goes in CLASSIC (over
+// the view: its place kept first and put back after) on two different
+// grounds, so what it leaves bare is known, then put down again where the
+// look says, its size times fBarScale, faded by the slider. Only the bar's
+// own picture: none of the border beside it (ECWolf's widescreen teal).
+void DrawBar(const IOSTouchHudLayout &hl, Canvas &cv, const Map &m)
+{
+	double bx = 0, by = 160, bw = 320, bh = 40;
+	screen->VirtualToRealCoords(bx, by, bw, bh, 320, 200, true, true);
+	const int x0 = std::max(0, (int)floor(bx + 0.5)), y0 = std::max(0, (int)floor(by + 0.5));
+	const int x1 = std::min(cv.w, (int)floor(bx + bw + 0.5)), y1 = std::min(cv.h, (int)floor(by + bh + 0.5));
+	const int w = x1 - x0, h = y1 - y0;
+	if(w <= 8 || h <= 8)
+		return;
+	std::vector<BYTE> under((size_t)w * h), bar((size_t)w * h), bar2((size_t)w * h);
+	for(int y = 0;y < h;y++)
+		memcpy(&under[(size_t)y * w], cv.buf + (y + y0) * cv.pitch + x0, w);
+	for(int pass = 0;pass < 2;pass++)
+	{
+		std::vector<BYTE> &dst = pass ? bar2 : bar;
+		for(int y = 0;y < h;y++)
+			memset(cv.buf + (y + y0) * cv.pitch + x0, pass ? 0xFF : 0x00, w);
+		ingame = false; // (as the game's own "show the status bar" button)
+		StatusBar->DrawStatusBar();
+		ingame = true;
+		for(int y = 0;y < h;y++)
+			memcpy(&dst[(size_t)y * w], cv.buf + (y + y0) * cv.pitch + x0, w);
+	}
+	for(int y = 0;y < h;y++)
+		memcpy(cv.buf + (y + y0) * cv.pitch + x0, &under[(size_t)y * w], w);
+	// what the bar covers (the same on both grounds), and its bounds
+	int sx0 = w, sy0 = h, sx1 = 0, sy1 = 0;
+	for(int y = 0;y < h;y++)
+		for(int x = 0;x < w;x++)
+			if(bar[(size_t)y * w + x] == bar2[(size_t)y * w + x])
+			{
+				sx0 = std::min(sx0, x);
+				sx1 = std::max(sx1, x + 1);
+				sy0 = std::min(sy0, y);
+				sy1 = std::max(sy1, y + 1);
+			}
+	if(sx1 <= sx0 || sy1 <= sy0)
+		return;
+
+	const double k = hl.fBarScale >= 0.3f && hl.fBarScale <= 1 ? hl.fBarScale : 1;
+	const int dh = (int)floor((sy1 - sy0) * k + 0.5);
+	const int bottom = std::min(cv.h, (int)floor(m.Y(hl.fPillBottom) + 0.5));
+	const int top = bottom - dh;
+	const int cut = std::max(sx0 + 1, std::min(sx1 - 1, (int)floor(BarCut() * w / 320.0 + 0.5)));
+	const int left = (int)floor(m.X(hl.fLeft) + 0.5), right = (int)floor(m.X(hl.fRight) + 0.5);
+	// the pieces: source columns [s0, s1), dw of the frame's pixels wide at dx
+	struct Piece { int s0, s1, dw, dx; } pieces[2];
+	int ctPieces = 1;
+	pieces[0].s0 = sx0;
+	pieces[0].s1 = sx1;
+	pieces[0].dw = (int)floor((sx1 - sx0) * k + 0.5);
+	pieces[0].dx = (cv.w - pieces[0].dw) / 2;
+	if(hl.iStyle == IOSTOUCH_HUD_CSPLIT)
+	{
+		const int lw = (int)floor((cut - sx0) * k + 0.5), rw = (int)floor((sx1 - cut) * k + 0.5);
+		if(left + lw <= right - rw)
+		{
+			pieces[0].s1 = cut;
+			pieces[0].dw = lw;
+			pieces[0].dx = left;
+			pieces[1].s0 = cut;
+			pieces[1].s1 = sx1;
+			pieces[1].dw = rw;
+			pieces[1].dx = right - rw;
+			ctPieces = 2;
+		}
+	}
+	const float a = hl.fAlpha < 0.2f ? 0.2f : (hl.fAlpha > 1 ? 1 : hl.fAlpha);
+	for(int i = 0;i < ctPieces;i++)
+	{
+		const Piece &pc = pieces[i];
+		for(int y = std::max(top, 0);y < bottom;y++)
+		{
+			const int sy = std::min(sy1 - 1, sy0 + (int)((y - top + 0.5) / k));
+			for(int dx = 0;dx < pc.dw;dx++)
+			{
+				const int x = pc.dx + dx;
+				const int sx = std::min(pc.s1 - 1, pc.s0 + (int)((dx + 0.5) / k));
+				const size_t at = (size_t)sy * w + sx;
+				if(x < 0 || x >= cv.w || bar[at] != bar2[at])
+					continue;
+				BYTE &d = cv.buf[y * cv.pitch + x];
+				if(a >= 0.999f)
+				{
+					d = bar[at];
+					continue;
+				}
+				const PalEntry &t = GPalette.BaseColors[bar[at]], &u = GPalette.BaseColors[d];
+				const int r = (int)(u.r + (t.r - u.r) * a + 0.5f);
+				const int g = (int)(u.g + (t.g - u.g) * a + 0.5f);
+				const int b = (int)(u.b + (t.b - u.b) * a + 0.5f);
+				d = nearest[((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)];
+			}
+		}
+	}
+	barTop = m.outH > 0 ? (float)((m.oy + top / m.ky) / m.outH) : 0;
+}
+
 } // namespace
+
+float IOSHud_BarTop()
+{
+	return barTop;
+}
 
 void IOSHud_Draw()
 {
 	IOSTouchHudLayout hl;
 	IOSTouch_GetHudLayout(&hl);
-	if(hl.iStyle != IOSTOUCH_HUD_SPLIT && hl.iStyle != IOSTOUCH_HUD_STRIP)
+	const bool bars = hl.iStyle == IOSTOUCH_HUD_CSPLIT || hl.iStyle == IOSTOUCH_HUD_CSTRIP;
+	if(!bars)
+		barTop = 0;
+	if(hl.iStyle != IOSTOUCH_HUD_SPLIT && hl.iStyle != IOSTOUCH_HUD_STRIP && !bars)
 		return;
 	if(viewsize < 21 || !ingame || IOSCamera_HidesWeapon() || gamestate.victoryflag)
 		return;
@@ -706,7 +834,6 @@ void IOSHud_Draw()
 	BYTE *buf = screen->GetBuffer();
 	if(!buf)
 		return;
-	LoadGfx();
 	MakeNearest();
 	Canvas cv;
 	cv.buf = buf;
@@ -715,6 +842,13 @@ void IOSHud_Draw()
 	cv.h = screen->GetHeight();
 	Map m;
 	m.Make(cv.w, cv.h);
+	if(bars)
+	{
+		if(StatusBar)
+			DrawBar(hl, cv, m);
+		return;
+	}
+	LoadGfx();
 
 	Parts you, gun;
 	MakeParts(pl, hl.bFace != 0, you, gun);

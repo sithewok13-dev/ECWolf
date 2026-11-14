@@ -157,23 +157,29 @@ int IOSTouch_TakeMenuKey(void);
    whole screen until IOSTouch_Update has seen SDL's view. */
 void IOSTouch_GetHudFrame(float afFrame[4]);
 /* The HUD (MENU's tray's HUD and FACE, and OPACITY's HUD slider,
-   remembered; ECWolf's status bar code draws it, wolf_sbar.cpp): SPLIT, two
-   pills at the bottom (BJ on the left: face, health, lives; the gun, its
-   ammo and the keys on the right: FIRE and USE move up clear of it), STRIP
-   (one pill in the middle, between the buttons), CLASSIC (the game's status
-   bar: FIRE and USE keep above it) or NONE; FACE, BJ's face in the pills;
-   fAlpha, how strongly the HUD shows (20%-100%; CLASSIC's status bar too).
+   remembered; ECWolf's status bar code draws it, wolf_sbar.cpp, IOSHud.cpp):
+   SPLIT, two pills at the bottom (BJ on the left: face, health, lives; the
+   gun, its ammo and the keys on the right), STRIP (one pill in the middle),
+   CLASSIC SPLIT (the game's 320-wide status bar over the whole view, cut
+   after the face: its left part to the bottom left corner, its right part to
+   the bottom right), CLASSIC STRIP (that bar whole in the middle), CLASSIC
+   (the game's status bar as it is) or NONE. FIRE and USE keep above the
+   pills and the bars. FACE, BJ's face in the pills (the bars always have
+   it); fAlpha, how strongly the HUD shows (20%-100%; the bars too). SIZE:
+   the pills small, medium or large, the CLASSIC SPLIT / STRIP bars small or
+   normal. The values are kept in the settings: new ones only at the end.
    Where the pills go, in fractions of the screen: */
-enum { IOSTOUCH_HUD_SPLIT = 0, IOSTOUCH_HUD_STRIP, IOSTOUCH_HUD_CLASSIC, IOSTOUCH_HUD_NONE, IOSTOUCH_HUD_COUNT };
+enum { IOSTOUCH_HUD_SPLIT = 0, IOSTOUCH_HUD_STRIP, IOSTOUCH_HUD_CLASSIC, IOSTOUCH_HUD_NONE,
+       IOSTOUCH_HUD_CSPLIT, IOSTOUCH_HUD_CSTRIP, IOSTOUCH_HUD_COUNT };
 typedef struct IOSTouchHudLayout {
   int iStyle;          /* IOSTOUCH_HUD_* */
   int bFace;           /* BJ's face in the pills */
   float fAlpha;        /* the HUD slider: 0.2 to 1 */
   float fPillH;        /* a pill's height (of the screen's height) */
   float fPillBottom;   /* the pills' bottom edge (of the height, from the top) */
-  float fLeft, fRight; /* SPLIT's pills' outer edges (of the width) */
-  float fStripHalf;    /* STRIP: its pill reaches at most this far either side of the middle (of the width),
-                          clear of the buttons */
+  float fLeft, fRight; /* SPLIT's pills' (and CLASSIC SPLIT's halves') outer edges (of the width) */
+  float fStripHalf;    /* STRIP: its pill reaches at most this far either side of the middle (of the width) */
+  float fBarScale;     /* CLASSIC SPLIT / STRIP: the bar's size, of the game's own (1, or 0.75 for small) */
 } IOSTouchHudLayout;
 void IOSTouch_GetHudLayout(IOSTouchHudLayout *pLayout);
 /* The frame rate asked of the screen: fixed at 60 in Wolf3D (no switch in

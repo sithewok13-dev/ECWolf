@@ -86,22 +86,35 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   groups` (areas with 3+ enemies), `cam gather n`;
   `@CAMERA`, `@TRAYCAM`; photos in `$IOSCAM_DIR`; `cam hash` (actors,
   map, clock, every RNG) is printed before and after each held stage.
-- **HUD** (tray's HUD: SPLIT -> STRIP -> CLASSIC -> NONE, default SPLIT,
-  tap only; FACE on/off, default on; NSUserDefaults `iosTouchHud` 0-3,
-  `iosTouchHudFace`; the owner's approved mockups, from the UZDoom port's):
-  SPLIT, STRIP and NONE give the 3D view the whole screen (view size 21,
-  no status bar; CLASSIC view size 20; set each play-loop pass from the
-  HUD, `HudViewSize` in `IOSGame_CheckKeys`). SPLIT draws two dark rounded
-  pills at the bottom: left [BJ's face] | first-aid kit + health % | the
-  extra life + lives; right the gun in hand (its status-bar picture,
-  recoloured light grey) + ammo | the keys held. FIRE and USE sit 14 pt
-  above them. STRIP: one pill in the middle, shrunk to fit between FIRE/
-  USE and the middle. CLASSIC: ECWolf's status bar, FIRE and USE above it
-  (its top from the game, `fStatusTop`). NONE: nothing. Warnings: health
-  under 25 red, with a red glow pulsing twice a second (and the game's own
-  bloodied face); ammo red strictly below 25% of its maximum, or at 0.
-  One size, the owner's "large": the pill is 83 px at 2000x921 (39.8 pt of
-  a 440 pt screen, 1.3x the mockups'; its bottom where the mockups' was),
+- **HUD** (tray's HUD: SPLIT -> STRIP -> CLASSIC SPLIT -> CLASSIC STRIP
+  -> CLASSIC -> NONE, default SPLIT, tap only; FACE on/off, default on;
+  NSUserDefaults `iosTouchHud` (SPLIT 0, STRIP 1, CLASSIC 2, NONE 3,
+  CLASSIC SPLIT 4, CLASSIC STRIP 5), `iosTouchHudFace`; the owner's
+  approved mockups, from the UZDoom port's): all but CLASSIC give the 3D
+  view the whole screen (view size 21, no status bar; CLASSIC view size
+  20; set each play-loop pass from the HUD, `HudViewSize` in
+  `IOSGame_CheckKeys`). SPLIT draws two dark rounded pills at the bottom:
+  left [BJ's face] | first-aid kit + health % | the extra life + lives;
+  right the gun in hand (its status-bar picture, recoloured light grey) +
+  ammo | the keys held. STRIP: the same in one pill in the middle. FIRE and
+  USE sit 14 pt above the pills (both looks). CLASSIC SPLIT: ECWolf's own
+  320-wide status bar (none of the widescreen teal border beside it) over
+  the view, cut after the face's box (column 164 of 320: floor, score,
+  lives, face | health, ammo, keys, weapon) to the pills' outer edges and
+  bottom; CLASSIC STRIP: that bar whole in the middle at the same bottom
+  (`DrawBar` in `IOSHud.cpp`: the bar drawn in place on two grounds to
+  find its bare pixels, then moved; the face always shows). CLASSIC:
+  ECWolf's status bar. FIRE and USE keep 10 pt above the bars' top (from
+  the game, `fStatusTop`; the moved bars' from `IOSHud_BarTop`). NONE:
+  nothing. Warnings: health under 25 red, with a red glow pulsing twice a
+  second (and the game's own bloodied face); ammo red strictly below 25%
+  of its maximum, or at 0.
+  SIZE (no tray control yet; rig `hudsize`): the pills small (30.6 pt of a
+  440 pt screen, the mockups'), medium (39.8 pt, 83 px at 2000x921,
+  default) or large (1.3x medium), `iosTouchHudSize` 0-2; the CLASSIC
+  SPLIT / STRIP bars normal (the game's own scale, default) or small
+  (0.75), `iosTouchHudBarSize` 0-1. The pills' bottom is where the
+  mockups' was,
   scaled with the screen's height (0.8-1.25x), inside the safe frame and
   3 pt inside the game's picture (`IOSTouchHud.fPictureBottom`: the picture
   stops above the home indicator, so the pills are ~8 pt higher than in
@@ -204,7 +217,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   exits 3. Script lines: `frame <n>`, `wait <n>`, `waitplay` (until a
   level is being played), touches (`down/move/up <id> <x y | @BUTTON>`,
   e.g. `@SAVE`, `@TRAYCHEAT`, `@TRAYHUD`; `tapslice`, `state`, `levels`,
-  `level <i>`; `hud <split|strip|classic|none> [face]`, `opacityslide
+  `level <i>`; `hud <split|strip|csplit|cstrip|classic|none> [face]`, `hudsize <small|medium|large|normal>`, `opacityslide
   <buttons|hud> <0.2-1>` on the open OPACITY panel; the HUD's settings in
   `$HOME/.iosrig-hud`), `pos`, `key <SDL name>`, `shot <png>` (ImageMagick
   `import`), `rigset health n | ammo n | all | weapon i` (rig only: the
