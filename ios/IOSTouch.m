@@ -3488,6 +3488,7 @@ typedef struct {
 - (void)makeCamera;
 - (void)setRunLit:(int)bLit;
 - (void)refreshCheat;
+- (void)syncArk;
 - (void)placeLevelPanel;
 @end
 
@@ -3846,6 +3847,7 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
 
   for (int i = 0; i < IOSTOUCH_NUM_BUTTONS; i++) {
     aButtonViews[i].center = CGPointMake(_aButtons[i].x, _aButtons[i].y);
+    if (i == BTN_CHEAT) [self syncArk];
   }
   trayBack.frame = CGRectMake(_rTrayBack.x0, _rTrayBack.y0, _rTrayBack.x1 - _rTrayBack.x0, _rTrayBack.y1 - _rTrayBack.y0);
   bTrayLevelShown = _bTrayLevelPlaced;
@@ -4195,6 +4197,7 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
     iFpsLabel = _iFpsShown;
     fpsLabel.text = (_iFpsShown < 0) ? @"-- FPS" : [NSString stringWithFormat:@"%d FPS", _iFpsShown];
   }
+  [self syncArk];
 }
 
 - (void)refreshAll
@@ -4867,13 +4870,18 @@ static void IOSTouch_SetSymbol(UILabel *l, NSString *name, CGFloat size, NSStrin
     ctCheatTicksFelt = _ctCheatTicks;
     [cheatThump impactOccurred];
   }
-  if (arkView) {
-    // (the Ark's view goes where the button goes, shown and faded with it)
-    UILabel *b = aButtonViews[BTN_CHEAT];
-    if (!CGPointEqualToPoint(arkView.center, b.center)) arkView.center = b.center;
-    if (arkView.hidden != b.hidden) arkView.hidden = b.hidden;
-    if (arkView.alpha != b.alpha) arkView.alpha = b.alpha;
-  }
+  [self syncArk];
+}
+
+// The Ark's view goes where CHEAT goes, shown and faded with it (after the
+// buttons are laid out and after their looks change)
+- (void)syncArk
+{
+  if (!arkView) return;
+  UILabel *b = aButtonViews[BTN_CHEAT];
+  if (!CGPointEqualToPoint(arkView.center, b.center)) arkView.center = b.center;
+  if (arkView.hidden != b.hidden) arkView.hidden = b.hidden;
+  if (arkView.alpha != b.alpha) arkView.alpha = b.alpha;
 }
 
 // ------------------------------------------------------- the cheat's levels
