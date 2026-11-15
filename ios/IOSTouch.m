@@ -3405,6 +3405,7 @@ typedef struct {
   // (-1: not yet set), CHEAT's showing as the app's settings have it, the
   // taps felt (a thump each), the list of levels
   CALayer *cheatFace;
+  UIView *arkView;           // (CHEAT's Ark: its own view under the button, glow and all)
   UIImage *arkPics[2];       // CHEAT's own pictures, the Ark (off: closed and grey; on: open, its light), made for this port
   id cheatImages[2];
   CAShapeLayer *cheatRing;
@@ -4795,13 +4796,21 @@ static void IOSTouch_SetSymbol(UILabel *l, NSString *name, CGFloat size, NSStrin
   arkPics[0] = [UIImage imageWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"cheat-ark-off" ofType:@"png"]];
   arkPics[1] = [UIImage imageWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"cheat-ark-on" ofType:@"png"]];
   if (arkPics[0] && arkPics[1]) {
-    cheatFace.frame = CGRectMake(-r, -r, 4 * r, 4 * r);
+    // its own view just under the button (which stays round and clipped),
+    // following it about: the glow reaches past the button's edge
+    arkView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 4 * r, 4 * r)];
+    arkView.userInteractionEnabled = NO;
+    arkView.backgroundColor = [UIColor clearColor];
+    cheatFace.frame = arkView.bounds;
     cheatFace.magnificationFilter = kCAFilterLinear;
     cheatFace.minificationFilter = kCAFilterTrilinear;
-    b.clipsToBounds = NO; // (the glow reaches past the button)
+    [arkView.layer addSublayer:cheatFace];
+    [self insertSubview:arkView belowSubview:b];
   }
-  else arkPics[0] = arkPics[1] = nil;
-  [b.layer insertSublayer:cheatFace atIndex:0];
+  else {
+    arkPics[0] = arkPics[1] = nil;
+    [b.layer insertSublayer:cheatFace atIndex:0];
+  }
   cheatRing = IOSTouch_MakeHoldRing(r);
   cheatRing.strokeColor = IOSTouch_CheatGold(0.95).CGColor;
   [b.layer addSublayer:cheatRing];
@@ -4857,6 +4866,13 @@ static void IOSTouch_SetSymbol(UILabel *l, NSString *name, CGFloat size, NSStrin
   if (ctCheatTicksFelt != _ctCheatTicks) {
     ctCheatTicksFelt = _ctCheatTicks;
     [cheatThump impactOccurred];
+  }
+  if (arkView) {
+    // (the Ark's view goes where the button goes, shown and faded with it)
+    UILabel *b = aButtonViews[BTN_CHEAT];
+    if (!CGPointEqualToPoint(arkView.center, b.center)) arkView.center = b.center;
+    if (arkView.hidden != b.hidden) arkView.hidden = b.hidden;
+    if (arkView.alpha != b.alpha) arkView.alpha = b.alpha;
   }
 }
 
