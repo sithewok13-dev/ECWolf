@@ -292,6 +292,9 @@ if(ECWOLF_IOS)
 		MACOSX_BUNDLE_BUNDLE_VERSION "${ECWOLF_IOS_VERSION}"
 		XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
 	)
+	# CHEAT's pictures, the Ark (made for this port: ios/art)
+	add_custom_command(TARGET engine POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/ios/art/cheat-ark-off.png ${CMAKE_SOURCE_DIR}/ios/art/cheat-ark-on.png $<TARGET_FILE_DIR:engine>/)
 elseif(APPLE)
 	target_sources(engine PRIVATE
 		macosx/filesys.mm

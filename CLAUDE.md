@@ -147,10 +147,17 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   row, half way between the middle and SAVE) and switches the cheat on, or
   tapped again leaves cheat mode (off, button gone). CHEAT held 0.5 s
   (gold ring) = on (gold, BJ's face in colour) / off (grey face); a tap does
-  nothing. Its picture is BJ's status-bar face, grinning, from the player's
-  own data at run time (`STFGOD0` in Spear, else `STFEVL0`, else `STFST00`;
-  `FeedCheatIcon` in `IOSGame.cpp`; nothing in the repo). Coming on plays
-  the game's "Yeah!" (`misc/yeah`); off is silent. Typing the word (key
+  nothing. Its picture is the Ark of the Covenant (the owner's design, made
+  for this port in Wolf3D's own palette and treasure gold, so it is in the
+  repo: `ios/art/cheat-ark-off.png` / `-on.png`, whole-button pictures twice
+  the button across with the disc half see-through, copied into the app by
+  `src/CMakeLists.txt`): off closed and grey, its two kneeling angels; on the
+  lid off, a wide beam and dashed rays fanning up out of it to the button's
+  edge, a gold glow. Without them, BJ's status-bar face from the player's data
+  (`FeedCheatIcon`). Coming on plays a sound made for this port
+  (`misc/sithewok`, `wadsrc/static/sounds/sithewok.wav`: an echoing organ
+  swell and climb gliding into a steady scream, on the game's own OPL
+  emulator); off is silent. Typing the word (key
   presses: the iOS keyboard sends letters as keys) toggles it and the
   button. While on (single player only; `KeepCheat`, once a tic): god mode,
   every weapon and the ammo (`IOSCheat_GiveAll` in `wl_debug.cpp`, the

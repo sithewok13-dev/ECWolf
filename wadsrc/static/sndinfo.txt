@@ -26,6 +26,7 @@ misc/100percent			{ DSPRC100 ALPRC100 PCPRC100 }
 misc/slurpie			{ DSSLURPE ALSLURPE PCSLURPE }
 misc/slurpie2			{ DSLSLURP ALSLURPE PCSLURPE }
 misc/yeah				{ DSYEAH ALYEAH PCYEAH }
+misc/sithewok		{ SITHEWOK NULL NULL } // (iOS: the cheat coming on, a new sound made for this port)
 misc/fart				{ DSFART ALFART PCFART }
 misc/crash				{ DSCRASH ALFART PCFART }
 $alias misc/dogfood_pkup	misc/health_pkup

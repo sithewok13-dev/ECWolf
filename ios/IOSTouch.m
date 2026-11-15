@@ -3405,6 +3405,7 @@ typedef struct {
   // (-1: not yet set), CHEAT's showing as the app's settings have it, the
   // taps felt (a thump each), the list of levels
   CALayer *cheatFace;
+  UIImage *arkPics[2];       // CHEAT's own pictures, the Ark (off: closed and grey; on: open, its light), made for this port
   id cheatImages[2];
   CAShapeLayer *cheatRing;
   // CAMERA: its selfie hold's ring, the tray CAMERA's (held for the
@@ -4144,6 +4145,13 @@ static CAShapeLayer *IOSTouch_MakeHoldRing(CGFloat r)
       l.layer.borderColor = bOn ? [UIColor colorWithRed:1.0 green:0.85 blue:0.3 alpha:0.95].CGColor
                                 : [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
     }
+    // CHEAT as the Ark: the picture is the whole button (its own disc, ring
+    // and glow), clearly there while off
+    if (i == BTN_CHEAT && arkPics[0]) {
+      l.backgroundColor = bHeld ? [UIColor colorWithWhite:1.0 alpha:0.18] : [UIColor clearColor];
+      l.layer.borderColor = [UIColor clearColor].CGColor;
+      l.alpha = _fOpacity;
+    }
   }
   // the small label under USE while the cheat can make it go through walls
   {
@@ -4782,7 +4790,18 @@ static void IOSTouch_SetSymbol(UILabel *l, NSString *name, CGFloat size, NSStrin
   cheatFace.magnificationFilter = kCAFilterNearest;
   cheatFace.frame = CGRectMake(r - 15, r - 17, 30, 34);
   cheatFace.hidden = YES;
-  [b.layer addSublayer:cheatFace];
+  // the Ark: whole-button pictures from the app (twice the button across,
+  // its glow round it), used instead of BJ's face where they're there
+  arkPics[0] = [UIImage imageWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"cheat-ark-off" ofType:@"png"]];
+  arkPics[1] = [UIImage imageWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"cheat-ark-on" ofType:@"png"]];
+  if (arkPics[0] && arkPics[1]) {
+    cheatFace.frame = CGRectMake(-r, -r, 4 * r, 4 * r);
+    cheatFace.magnificationFilter = kCAFilterLinear;
+    cheatFace.minificationFilter = kCAFilterTrilinear;
+    b.clipsToBounds = NO; // (the glow reaches past the button)
+  }
+  else arkPics[0] = arkPics[1] = nil;
+  [b.layer insertSublayer:cheatFace atIndex:0];
   cheatRing = IOSTouch_MakeHoldRing(r);
   cheatRing.strokeColor = IOSTouch_CheatGold(0.95).CGColor;
   [b.layer addSublayer:cheatRing];
@@ -4822,11 +4841,18 @@ static void IOSTouch_SetSymbol(UILabel *l, NSString *name, CGFloat size, NSStrin
     iCheatLook = iLook;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    cheatFace.contents = cheatImages[iLook];
-    cheatFace.opacity = iLook ? 1.0f : 0.75f;
-    cheatFace.hidden = (cheatImages[iLook] == nil);
+    if (arkPics[0]) {
+      cheatFace.contents = (__bridge id)arkPics[iLook].CGImage;
+      cheatFace.opacity = 1.0f;
+      cheatFace.hidden = NO;
+    }
+    else {
+      cheatFace.contents = cheatImages[iLook];
+      cheatFace.opacity = iLook ? 1.0f : 0.75f;
+      cheatFace.hidden = (cheatImages[iLook] == nil);
+    }
     [CATransaction commit];
-    aButtonViews[BTN_CHEAT].textColor = cheatImages[iLook] ? [UIColor clearColor] : [UIColor colorWithWhite:1.0 alpha:0.85];
+    aButtonViews[BTN_CHEAT].textColor = (arkPics[0] || cheatImages[iLook]) ? [UIColor clearColor] : [UIColor colorWithWhite:1.0 alpha:0.85];
   }
   if (ctCheatTicksFelt != _ctCheatTicks) {
     ctCheatTicksFelt = _ctCheatTicks;

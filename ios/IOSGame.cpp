@@ -947,7 +947,7 @@ void IOSGame_Frame()
 		IOSTouch_ShowMessage(alwaysrun ? "Always run on: the stick always runs" : "Always run off: slide up onto ^^ to run", 2.0);
 	}
 	if(req & IOSTOUCH_REQ_CHEATSOUND)
-		SD_PlaySound("misc/yeah"); // ("Yeah!", the end of a level's 100% bonus)
+		SD_PlaySound("misc/sithewok"); // (a sound made for this port: an echoing rise into a scream; sndinfo.txt)
 	PumpKeys();
 #ifdef ECWOLF_IOSRIG
 	RigFrame();
