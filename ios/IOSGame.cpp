@@ -119,30 +119,37 @@ bool IOSGame_GameResolution(int *w, int *h)
 	if(!RigGeometry(&ptW, &ptH, &scale, &bottomPt))
 		return false;
 #endif
-	const double W = ptW * scale, H = (ptH - bottomPt) * scale;
-	// the shapes ECWolf knows (wl_main.cpp: CheckRatio), the one shown biggest
+	// the whole screen, under the home indicator too: the shape ECWolf knows
+	// (wl_main.cpp: CheckRatio) that covers it losing the least, its sides
+	// (or top and bottom) cut off evenly by IOSGame_PictureRect; a phone:
+	// 64:27, about 4% off each side
+	(void)bottomPt;
+	const double W = ptW * scale, H = ptH * scale;
 	static const double shapes[][2] = { { 4, 3 }, { 16, 10 }, { 16, 9 }, { 64, 27 } };
-	double best = 0, bestArea = 0;
+	double best = 0, bestCut = 2;
 	for(unsigned int i = 0;i < 4;i++)
 	{
 		const double a = shapes[i][0] / shapes[i][1];
-		const double pw = W < H * a ? W : H * a;
-		if(pw * (pw / a) > bestArea * 1.01)
+		const double cut = a > W / H ? 1 - (W / H) / a : 1 - a / (W / H);
+		if(cut < bestCut - 0.001)
 		{
-			bestArea = pw * (pw / a);
+			bestCut = cut;
 			best = a;
 		}
 	}
-	double ph = (W < H * best ? W : H * best) / best;
 	// half the screen's pixels once that's still 360 rows or more (the
 	// game draws in software: a quarter of the work)
-	const int div = ph >= 720 ? 2 : 1;
-	int gh = ((int)(ph / div)) & ~1;
-	int gw = ((int)(gh * best + 0.5)) & ~1;
-	while(gw * div > (int)W && gh > 200)
+	const int div = H >= 720 ? 2 : 1;
+	int gw, gh;
+	if(best >= W / H)
 	{
-		gh -= 2;
+		gh = ((int)ceil(H / div) + 1) & ~1;
 		gw = ((int)(gh * best + 0.5)) & ~1;
+	}
+	else
+	{
+		gw = ((int)ceil(W / div) + 1) & ~1;
+		gh = ((int)(gw / best + 0.5)) & ~1;
 	}
 	if(gw < 320 || gh < 200)
 		return false;
@@ -157,32 +164,16 @@ bool IOSGame_PictureRect(SDL_Window *pWindow, int outW, int outH, int texW, int 
 {
 	if(outW <= 0 || outH <= 0 || texW <= 0 || texH <= 0)
 		return false;
-	double bottom = 0;
-#ifdef ECWOLF_IOS
-	bottom = IOS_ViewBottomInset(pWindow, outH);
-#else
 	(void)pWindow;
-	double ptW, ptH, scale, bottomPt;
-	if(!RigGeometry(&ptW, &ptH, &scale, &bottomPt))
-		return false;
-	bottom = bottomPt * scale;
-#endif
-	if(bottom < 0 || bottom > outH / 4)
-		bottom = 0;
-	const double availH = outH - bottom;
+	// covering the screen (IOSGame_GameResolution's shape), centred, at a
+	// whole number of the screen's pixels to the game's when that's within 1%
 	double k = (double)outW / texW;
-	if(availH / texH < k)
-		k = availH / texH;
-	// a whole number of the screen's pixels to the game's, when that loses
-	// little (sharp, even pixels)
-	if(k >= 1 && floor(k) / k >= 0.9)
-		k = floor(k);
+	if((double)outH / texH > k)
+		k = (double)outH / texH;
+	if(k >= 1 && fabs(k - floor(k + 0.5)) < 0.01 * k)
+		k = floor(k + 0.5);
 	const int w = (int)(texW * k + 0.5), h = (int)(texH * k + 0.5);
-	int y = (outH - h) / 2;
-	if(y + h > (int)availH)
-		y = (int)availH - h;
-	if(y < 0)
-		y = 0;
+	const int y = (outH - h) / 2;
 	dst->x = (outW - w) / 2;
 	dst->y = y;
 	dst->w = w;
