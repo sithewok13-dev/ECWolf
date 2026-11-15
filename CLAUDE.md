@@ -146,7 +146,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
 - **The cheat (`sithewok`):** the tray's CHEAT shows the CHEAT button (top
   row, half way between the middle and SAVE) and switches the cheat on, or
   tapped again leaves cheat mode (off, button gone). CHEAT held 0.5 s
-  (gold ring) = on (gold, BJ's face in colour) / off (grey face); a tap does
+  (gold ring) = on (the Ark open, lit) / off (closed, grey); a tap does
   nothing. Its picture is the Ark of the Covenant (the owner's design, made
   for this port in Wolf3D's own palette and treasure gold, so it is in the
   repo: `ios/art/cheat-ark-off.png` / `-on.png`, whole-button pictures twice
