@@ -112,8 +112,8 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   SIZE (the HUD panel's SIZE row): the pills small (30.6 pt of a
   440 pt screen, the mockups'), medium (39.8 pt, 83 px at 2000x921,
   default) or large (1.3x medium), `iosTouchHudSize` 0-2; the CLASSIC
-  SPLIT / STRIP bars normal (the game's own scale, default) or small
-  (0.75), `iosTouchHudBarSize` 0-1. The pills' bottom is where the
+  SPLIT / STRIP bars small (0.6), medium (0.75, default) or large (the
+  game's own scale), `iosTouchHudBarSize` 0-2. The pills' bottom is where the
   mockups' was,
   scaled with the screen's height (0.8-1.25x), inside the safe frame and
   3 pt inside the game's picture (`IOSTouchHud.fPictureBottom`: the picture
@@ -280,7 +280,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     kept inside the safe area, rows of 40 pt, each its name at the left
     (78 pt) then: LOOK, six chips (SPLIT, STRIP, CLASSIC SPLIT, CLASSIC
     STRIP, CLASSIC, NONE); SIZE, SMALL / MEDIUM / LARGE for SPLIT and
-    STRIP, SMALL / NORMAL for the classic split and strip, hidden for
+    STRIP and the classic split and strip, hidden for
     CLASSIC and NONE; FACE (BJ's face in the pills), ON / OFF, only for
     SPLIT and STRIP; HUD, the HUD's opacity (`iosTouchHudOpacity`),
     hidden for CLASSIC and NONE; BUTTONS, the controls'
@@ -290,7 +290,7 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
     (fill 1, 0.75, 0.24 at 45%, a solid gold border), the others white at
     10% with a 45% white border; a tap applies at once (a light selection
     haptic; FIRE and USE move with the HUD). A tap on a row's name resets
-    that row (LOOK split, SIZE medium / normal, FACE on, a slider 100%)
+    that row (LOOK split, SIZE medium, FACE on, a slider 100%)
     with a toast and a haptic. HUD held 0.45 s (ring) = everything back
     (split, medium, face on, both 100%), "HUD back to the defaults: split,
     medium, face on, both opacities 100%", a haptic, the panel closes.

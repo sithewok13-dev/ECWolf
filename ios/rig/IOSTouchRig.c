@@ -363,13 +363,9 @@ void IOSTouchRig_Command(const char *cmd)
   }
   else if (!strcmp(op, "hudsize") && argc >= 2) {
     IOSTouch_HudPrefs();
-    if (!strcasecmp(argv[1], "small")) {
-      if (IOSTouch_HudIsBar(_iHudStyle)) _iHudBarSize = 0;
-      else _iHudSize = 0;
-    }
-    else if (!strcasecmp(argv[1], "medium")) _iHudSize = 1;
-    else if (!strcasecmp(argv[1], "large")) _iHudSize = 2;
-    else if (!strcasecmp(argv[1], "normal")) _iHudBarSize = 1;
+    const int k = !strcasecmp(argv[1], "small") ? 0 : !strcasecmp(argv[1], "medium") ? 1 : 2; // (normal: large)
+    if (IOSTouch_HudIsBar(_iHudStyle)) _iHudBarSize = k;
+    else _iHudSize = k;
     IOSTouch_SaveHudPrefs();
     printf("rig: hudsize pills %d bars %d\n", _iHudSize, _iHudBarSize);
   }
