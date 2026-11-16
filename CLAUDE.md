@@ -206,8 +206,14 @@ versions (Wolfenstein 3D, Spear of Destiny with its mission packs).
   data is in the app, and the public `ios-latest` prerelease on pushes to
   `ios` (never Latest; body first line "Build <run> · <YYYY-MM-DD>"). The
   build stamp ("build 80 · Nov 9", SWBuildNumber/SWBuildDate in Info.plist)
-  shows under the open MENU tray.
-- **Docs:** `docs/ios/README.md` (install with Feather, where the files go).
+  shows under the open MENU tray. Numbered releases: a manual run on `ios`
+  with `release=ios-vX.Y` (as Sam's: notes check, tag at the built commit,
+  only `RELEASE_IPAS`), then the AltStore/SideStore source
+  (`packaging/ios/altstore-source.json`, `update_altstore_source.py`) gets
+  the release, committed to `ios` ([skip ci], in paths-ignore).
+- **Docs:** `docs/ios/README.md` (setup guide), `docs/ios/RELEASE_NOTES.md`
+  (the release text, HOUSE_STYLE 4.3), `docs/ios/screenshots/` (from the
+  rig, used by README.md's top section and the source).
 
 ## Testing without a Mac (the Linux rig)
 

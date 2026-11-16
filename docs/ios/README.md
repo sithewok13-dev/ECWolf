@@ -7,9 +7,31 @@ Danger, Ultimate Challenge). No game files come with the app.
 
 ## Install
 
+You need an iPhone or iPad with iOS 15 or newer. The app isn't on the App
+Store, so you install it yourself ("sideloading").
+
+### Easiest: add the source in SideStore or AltStore
+
+1. Set up [SideStore](https://sidestore.io) or
+   [AltStore](https://altstore.io) (AltStore Classic; AltStore PAL can't
+   install it), with its own instructions.
+2. On your iPhone, tap
+   [Add to SideStore](https://sithewok13-dev.github.io/wolf3d/#add-sidestore)
+   or [Add to AltStore](https://sithewok13-dev.github.io/wolf3d/#add-altstore).
+   Or open the app, go to *Sources*, tap **+** and paste this address:
+   `https://raw.githubusercontent.com/sithewok13-dev/ECWolf/ios/packaging/ios/altstore-source.json`
+3. Install **Wolf3D** from the source. Updates come the same way.
+
+### Or download the IPA
+
 1. Download `Wolf3D-ios.ipa` from the
-   [iOS latest build](https://github.com/sithewok13-dev/ECWolf/releases/tag/ios-latest).
-2. Open it in Feather (or another sideloading app) and install it.
+   [releases page](https://github.com/sithewok13-dev/ECWolf/releases): the
+   newest numbered release, or the *iOS latest build* (rebuilt after every
+   change, before anyone has tried it).
+2. Open it in Feather, Sideloadly or another signing tool and install it.
+
+With a free Apple ID, sideloaded apps stop opening after 7 days until you
+refresh them in your tool, and you can have at most 3 at once.
 
 ## Your game files
 
@@ -38,12 +60,27 @@ iPhone > Wolf3D > ECWolf.
 - SAVE and LOAD: tap for the game's Save Game / Load Game menu; hold 0.3 s
   for a quick save / quick load.
 - MENU: tap for the game's menu; hold for the tray: LOOK (turning speed,
-  0.5x to 3x; hold it for 1x), ALWAYS RUN (the stick always runs), OPACITY,
-  FPS (shows or hides the frame counter; the game always runs at 60 frames
-  a second), CHEAT, LEVEL (while the cheat is on) and the keyboard.
+  0.5x to 3x; hold it for 1x), ALWAYS RUN (the stick always runs), HUD (the
+  HUD's look, size and opacity), FPS (shows or hides the frame counter; the
+  game always runs at 60 frames a second), the camera symbol (shows or
+  hides CAMERA; hold it for the camera's options), CHEAT, LEVEL (a list of
+  the game's levels), GAMES (with more than one game: switch game) and the
+  keyboard.
+- CAMERA (top, in the middle): tap for a photo, hold for a selfie, slide
+  sideways for a burst, down for Action Freeze, up for a cinematic burst.
+  Pictures go to Photos.
 - CHEAT (the tray's, or type "sithewok"): god mode, every weapon and key,
   ammo kept full. The CHEAT button at the top: hold it to switch the cheat
-  on or off. While it's on, hold USE for noclip (through walls), and the
-  tray's LEVEL lists the game's levels to go to.
+  on or off. While it's on, hold USE for noclip (through walls).
 - In the menus and on the title screens: tap to select or go on, slide up
   or down (or the arrows) to move, BACK to go back.
+
+## More
+
+- Every control in detail, known limitations and what was tested: the
+  [release notes](https://github.com/sithewok13-dev/ECWolf/blob/ios/docs/ios/RELEASE_NOTES.md).
+- No multiplayer: Wolfenstein 3D is a single-player game, and ECWolf's early
+  multiplayer test code can only be started from a computer's command line.
+- Found a bug? [Report it here](https://github.com/sithewok13-dev/ECWolf/issues),
+  not to upstream ECWolf, with `wolf3d-log.txt` (in Files > On My iPhone >
+  Wolf3D > ECWolf) and the build number (hold MENU: it's under the tray).

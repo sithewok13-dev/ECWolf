@@ -1,0 +1,73 @@
+{
+  "name": "Wolf3D for iOS (unofficial)",
+  "identifier": "io.github.sithewok13-dev.ecwolf-ios",
+  "subtitle": "Wolfenstein 3D and Spear of Destiny on iPhone and iPad",
+  "description": "An unofficial fan port of ECWolf to iPhone and iPad, with touch controls: Wolfenstein 3D, Spear of Destiny and its mission packs, from your own copy of the game.\n\nIt's a beta. Setup guide and bug reports: https://github.com/sithewok13-dev/ECWolf/tree/ios",
+  "iconURL": "https://raw.githubusercontent.com/sithewok13-dev/ECWolf/ios/src/macosx/icon.iconset/icon_512x512@2x.png",
+  "website": "https://github.com/sithewok13-dev/ECWolf/tree/ios",
+  "tintColor": "#b0302a",
+  "apps": [
+    {
+      "name": "Wolf3D",
+      "bundleIdentifier": "io.github.sithewok13.wolf3d",
+      "developerName": "sithewok13-dev",
+      "subtitle": "Wolfenstein 3D and Spear of Destiny, with touch controls",
+      "localizedDescription": "An unofficial fan port of ECWolf, the Wolfenstein 3D source port, to iPhone and iPad: play Wolfenstein 3D, Spear of Destiny and its two mission packs with touch controls made for them.\n\n- Widescreen at a steady 60 frames a second\n- A move stick wherever your thumb lands, drag to turn\n- A weapon wheel, and quick save / quick load with a short hold\n- Six HUD looks, from modern pills to the original status bar\n- A camera: photos, bursts, selfies with BJ and the enemies around you, and Action Freeze\n- The sithewok cheat (god mode, every weapon and key, noclip) and a list to jump to any level\n- Both games in one app\n\nYou need your own copy of the game (GOG or Steam); no game files are included. Open the app once, then copy the game's files into Files > On My iPhone > Wolf3D.\n\nIt's a beta: expect bugs, and back up your saves. No multiplayer.\n\nSetup guide: https://github.com/sithewok13-dev/ECWolf/blob/ios/docs/ios/README.md\n\nNot affiliated with or endorsed by id Software, ZeniMax, Bethesda or Microsoft, or by the ECWolf developers.",
+      "iconURL": "https://raw.githubusercontent.com/sithewok13-dev/ECWolf/ios/src/macosx/icon.iconset/icon_512x512@2x.png",
+      "tintColor": "#b0302a",
+      "category": "games",
+      "screenshots": [
+        {
+          "imageURL": "https://raw.githubusercontent.com/sithewok13-dev/ECWolf/ios/docs/ios/screenshots/mecha-hitler.jpg",
+          "width": 1600,
+          "height": 736
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/sithewok13-dev/ECWolf/ios/docs/ios/screenshots/selfie.jpg",
+          "width": 1600,
+          "height": 675
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/sithewok13-dev/ECWolf/ios/docs/ios/screenshots/e1m1-cells.jpg",
+          "width": 1600,
+          "height": 736
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/sithewok13-dev/ECWolf/ios/docs/ios/screenshots/action-freeze.jpg",
+          "width": 1600,
+          "height": 675
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/sithewok13-dev/ECWolf/ios/docs/ios/screenshots/spear-death-knight.jpg",
+          "width": 1600,
+          "height": 736
+        }
+      ],
+      "versions": [
+        {
+          "version": "0.1.23",
+          "buildVersion": "23",
+          "marketingVersion": "ios-latest build 23",
+          "date": "2026-11-16T00:44:21Z",
+          "localizedDescription": "The newest test build (build 23, Nov 16), before the first numbered release.\n\nRelease page: https://github.com/sithewok13-dev/ECWolf/releases/tag/ios-latest",
+          "downloadURL": "https://github.com/sithewok13-dev/ECWolf/releases/download/ios-latest/Wolf3D-ios.ipa",
+          "size": 1888529,
+          "sha256": "a7e7bb2fe2acf133271010efc866fc8229c62dd4f2938e0b419f758cb87a88ab",
+          "minOSVersion": "15.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSPhotoLibraryAddUsageDescription": "The CAMERA button saves your photos, bursts and selfies of the game to Photos."
+        }
+      },
+      "version": "0.1.23",
+      "versionDate": "2026-11-16T00:44:21Z",
+      "versionDescription": "The newest test build (build 23, Nov 16), before the first numbered release.\n\nRelease page: https://github.com/sithewok13-dev/ECWolf/releases/tag/ios-latest",
+      "downloadURL": "https://github.com/sithewok13-dev/ECWolf/releases/download/ios-latest/Wolf3D-ios.ipa",
+      "size": 1888529
+    }
+  ],
+  "news": []
+}
