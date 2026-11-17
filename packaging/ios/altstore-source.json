@@ -45,14 +45,14 @@
       ],
       "versions": [
         {
-          "version": "0.1.23",
-          "buildVersion": "23",
-          "marketingVersion": "ios-latest build 23",
-          "date": "2026-11-16T00:44:21Z",
-          "localizedDescription": "The newest test build (build 23, Nov 16), before the first numbered release.\n\nRelease page: https://github.com/sithewok13-dev/ECWolf/releases/tag/ios-latest",
-          "downloadURL": "https://github.com/sithewok13-dev/ECWolf/releases/download/ios-latest/Wolf3D-ios.ipa",
-          "size": 1888529,
-          "sha256": "a7e7bb2fe2acf133271010efc866fc8229c62dd4f2938e0b419f758cb87a88ab",
+          "version": "0.1.25",
+          "buildVersion": "25",
+          "marketingVersion": "ios-v0.1",
+          "date": "2026-11-17T21:59:53Z",
+          "localizedDescription": "The first numbered release of Wolf3D, the app. Everything in it:\n- Wolfenstein 3D and Spear of Destiny in one app\n- Full screen, widescreen, at a steady 60 frames a second\n- Touch controls\n- A weapon wheel\n- Quick save and quick load\n- Six HUD looks\n- A camera\n- The sithewok cheat\n\nFull notes: https://github.com/sithewok13-dev/ECWolf/releases/tag/ios-v0.1",
+          "downloadURL": "https://github.com/sithewok13-dev/ECWolf/releases/download/ios-v0.1/Wolf3D-ios.ipa",
+          "size": 1888525,
+          "sha256": "823865e2b9afbf220aa4a88839a4a88b4480ec72c27639dc7e4031e9a98159d1",
           "minOSVersion": "15.0"
         }
       ],
@@ -62,11 +62,11 @@
           "NSPhotoLibraryAddUsageDescription": "The CAMERA button saves your photos, bursts and selfies of the game to Photos."
         }
       },
-      "version": "0.1.23",
-      "versionDate": "2026-11-16T00:44:21Z",
-      "versionDescription": "The newest test build (build 23, Nov 16), before the first numbered release.\n\nRelease page: https://github.com/sithewok13-dev/ECWolf/releases/tag/ios-latest",
-      "downloadURL": "https://github.com/sithewok13-dev/ECWolf/releases/download/ios-latest/Wolf3D-ios.ipa",
-      "size": 1888529
+      "version": "0.1.25",
+      "versionDate": "2026-11-17T21:59:53Z",
+      "versionDescription": "The first numbered release of Wolf3D, the app. Everything in it:\n- Wolfenstein 3D and Spear of Destiny in one app\n- Full screen, widescreen, at a steady 60 frames a second\n- Touch controls\n- A weapon wheel\n- Quick save and quick load\n- Six HUD looks\n- A camera\n- The sithewok cheat\n\nFull notes: https://github.com/sithewok13-dev/ECWolf/releases/tag/ios-v0.1",
+      "downloadURL": "https://github.com/sithewok13-dev/ECWolf/releases/download/ios-v0.1/Wolf3D-ios.ipa",
+      "size": 1888525
     }
   ],
   "news": []
